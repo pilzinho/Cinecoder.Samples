@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="..\packages\Cinecoder.3.32.16.21927\build\Cinecoder.props" Condition="Exists('..\packages\Cinecoder.3.32.16.21927\build\Cinecoder.props')" />
   <Import Project="..\packages\Cinecoder.Plugin.GpuCodecs.2.22.10.20016\build\Cinecoder.Plugin.GpuCodecs.props" Condition="Exists('..\packages\Cinecoder.Plugin.GpuCodecs.2.22.10.20016\build\Cinecoder.Plugin.GpuCodecs.props')" />
   <Import Project="..\packages\Cinecoder.Plugin.Multiplexers.1.1.9\build\Cinecoder.Plugin.Multiplexers.props" Condition="Exists('..\packages\Cinecoder.Plugin.Multiplexers.1.1.9\build\Cinecoder.Plugin.Multiplexers.props')" />
@@ -24,28 +24,28 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{599a18cc-94cf-45da-904a-2e4c40fdb4f3}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
-    <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.17763.0</WindowsTargetPlatformVersion>
     <ConfigurationType>Application</ConfigurationType>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
     <OutDir>$(SolutionDir)_bin\$(Configuration).$(Platform)\</OutDir>
     <IntDir>$(SolutionDir)_obj\$(ProjectName)\$(Configuration).$(PlatformTarget)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
     <OutDir>$(SolutionDir)_bin\$(Configuration).$(Platform)\</OutDir>
     <IntDir>$(SolutionDir)_obj\$(ProjectName)\$(Configuration).$(PlatformTarget)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
     <OutDir>$(SolutionDir)_bin\$(Configuration).$(Platform)\</OutDir>
     <IntDir>$(SolutionDir)_obj\$(ProjectName)\$(Configuration).$(PlatformTarget)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
     <OutDir>$(SolutionDir)_bin\$(Configuration).$(Platform)\</OutDir>
     <IntDir>$(SolutionDir)_obj\$(ProjectName)\$(Configuration).$(PlatformTarget)\</IntDir>
   </PropertyGroup>
