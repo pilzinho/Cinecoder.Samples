@@ -54,6 +54,8 @@ private:
 	ULONGLONG m_llTimeBase;
 	bool bIntraFormat;
 
+    ICC_ErrorHandler* m_pErrorHandler;
+
 public:
 	DecodeDaniel2();
 	~DecodeDaniel2();
@@ -94,6 +96,8 @@ public:
     CC_CHROMA_FORMAT GetChromaFormat() { return m_ChromaFormat; }
     CC_COLOR_FMT GetColorFormat() { return m_fmt; }
     DWORD GetBitDepth() { return m_BitDepth; }
+
+    void SetErrorHandler(ICC_ErrorHandler* const handler);
 
 #if defined(__WIN32__)
 private:
