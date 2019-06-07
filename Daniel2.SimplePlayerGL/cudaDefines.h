@@ -1,23 +1,23 @@
 #pragma once
 
 #ifdef CUDA_WRAPPER
-	enum cudaMemcpyKind
-	{
-		cudaMemcpyHostToHost = 0,      /**< Host   -> Host */
-		cudaMemcpyHostToDevice = 1,      /**< Host   -> Device */
-		cudaMemcpyDeviceToHost = 2,      /**< Device -> Host */
-		cudaMemcpyDeviceToDevice = 3,      /**< Device -> Device */
-		cudaMemcpyDefault = 4       /**< Direction of the transfer is inferred from the pointer values. Requires unified virtual addressing */
-	};
+enum cudaMemcpyKind
+{
+	cudaMemcpyHostToHost = 0,      /**< Host   -> Host */
+	cudaMemcpyHostToDevice = 1,      /**< Host   -> Device */
+	cudaMemcpyDeviceToHost = 2,      /**< Device -> Host */
+	cudaMemcpyDeviceToDevice = 3,      /**< Device -> Device */
+	cudaMemcpyDefault = 4       /**< Direction of the transfer is inferred from the pointer values. Requires unified virtual addressing */
+};
 
-	enum cudaGraphicsRegisterFlags
-	{
-		cudaGraphicsRegisterFlagsNone = 0,  /**< Default */
-		cudaGraphicsRegisterFlagsReadOnly = 1,  /**< CUDA will not write to this resource */
-		cudaGraphicsRegisterFlagsWriteDiscard = 2,  /**< CUDA will only write to and will not read from this resource */
-		cudaGraphicsRegisterFlagsSurfaceLoadStore = 4,  /**< CUDA will bind this resource to a surface reference */
-		cudaGraphicsRegisterFlagsTextureGather = 8   /**< CUDA will perform texture gather operations on this resource */
-	};
+enum cudaGraphicsRegisterFlags
+{
+	cudaGraphicsRegisterFlagsNone = 0,  /**< Default */
+	cudaGraphicsRegisterFlagsReadOnly = 1,  /**< CUDA will not write to this resource */
+	cudaGraphicsRegisterFlagsWriteDiscard = 2,  /**< CUDA will only write to and will not read from this resource */
+	cudaGraphicsRegisterFlagsSurfaceLoadStore = 4,  /**< CUDA will bind this resource to a surface reference */
+	cudaGraphicsRegisterFlagsTextureGather = 8   /**< CUDA will perform texture gather operations on this resource */
+};
 
 	enum cudaGraphicsMapFlags
 	{
@@ -26,22 +26,22 @@
 		cudaGraphicsMapFlagsWriteDiscard = 2   /**< CUDA will only write to and will not read from this resource */
 	};
 
-	enum cudaError
-	{
-		cudaSuccess = 0,
-		//...
-		cudaErrorStartupFailure = 0x7f,
-		cudaErrorApiFailureBase = 10000
-	};
+enum cudaError
+{
+	cudaSuccess = 0,
+	//...
+	cudaErrorStartupFailure = 0x7f,
+	cudaErrorApiFailureBase = 10000
+};
 
-	typedef struct cudaGraphicsResource *cudaGraphicsResource_t;
-	typedef struct cudaArray *cudaArray_t;
-	typedef struct CUstream_st *cudaStream_t;
-	typedef enum cudaError cudaError_t;
+typedef struct cudaGraphicsResource *cudaGraphicsResource_t;
+typedef struct cudaArray *cudaArray_t;
+typedef struct CUstream_st *cudaStream_t;
+typedef enum cudaError cudaError_t;
 
-	#define FUNC_CUDA(func) func
+#define FUNC_CUDA(func) func
 #else
-	#define FUNC_CUDA(func) f_##func
+#define FUNC_CUDA(func) f_##func
 #endif
 
 typedef cudaError_t(*FTcudaGetLastError)();
@@ -74,6 +74,8 @@ typedef cudaError_t(*FTcudaMemcpy2DToArray)(cudaArray_t dst, size_t wOffset, siz
 typedef cudaError_t(*FTcudaMemcpy2DToArrayAsync)(cudaArray_t dst, size_t wOffset, size_t hOffset, const void *src, size_t spitch, size_t width, size_t height, cudaMemcpyKind kind, cudaStream_t stream);
 typedef cudaError_t(*FTcudaMemcpyArrayToArray)(cudaArray_t dst, size_t wOffsetDst, size_t hOffsetDst, cudaArray_t src, size_t wOffsetSrc, size_t hOffsetSrc, size_t count, cudaMemcpyKind kind);
 
+typedef cudaError_t(*FTcudaGetDeviceCount)(int* count);
+
 extern FTcudaGetLastError FUNC_CUDA(cudaGetLastError);
 extern FTcudaGetErrorString FUNC_CUDA(cudaGetErrorString);
 
@@ -105,24 +107,26 @@ extern FTcudaMemcpy2DToArray FUNC_CUDA(cudaMemcpy2DToArray);
 extern FTcudaMemcpy2DToArrayAsync FUNC_CUDA(cudaMemcpy2DToArrayAsync);
 extern FTcudaMemcpyArrayToArray FUNC_CUDA(cudaMemcpyArrayToArray);
 
+extern FTcudaGetDeviceCount FUNC_CUDA(cudaGetDeviceCount);
+
 #if defined(_WIN32)
-	#define CUDART32_FILENAME "cudart32_80.dll"
-	#define CUDART64_FILENAME "cudart64_80.dll"
-	#if _WIN64
-		#define CUDART_FILENAME CUDART64_FILENAME
-	#else
-		#define CUDART_FILENAME CUDART32_FILENAME
-	#endif
+#define CUDART32_FILENAME "cudart32_80.dll"
+#define CUDART64_FILENAME "cudart64_80.dll"
+#if _WIN64
+#define CUDART_FILENAME CUDART64_FILENAME
 #else
-	#include <dlfcn.h>
-	#define LoadLibraryA(name) dlopen(name, RTLD_LAZY)
-	#define FreeLibrary(lib) dlclose(lib)
-	#define GetProcAddress(lib, func) dlsym(lib, func)
-	typedef void* FARPROC;
-	typedef void* HMODULE;
-	//#define CUDART_FILENAME "./libcudart.so.10.0"
-	//#define CUDART_FILENAME "/usr/local/cuda-10.0/lib64/libcudart.so.10.0"
-	#define CUDART_FILENAME "/usr/local/cuda-10.0/lib64/libcudart.so"
+#define CUDART_FILENAME CUDART32_FILENAME
+#endif
+#else
+#include <dlfcn.h>
+#define LoadLibraryA(name) dlopen(name, RTLD_LAZY)
+#define FreeLibrary(lib) dlclose(lib)
+#define GetProcAddress(lib, func) dlsym(lib, func)
+typedef void* FARPROC;
+typedef void* HMODULE;
+//#define CUDART_FILENAME "./libcudart.so.10.0"
+//#define CUDART_FILENAME "/usr/local/cuda-10.0/lib64/libcudart.so.10.0"
+#define CUDART_FILENAME "/usr/local/cuda-10.0/lib64/libcudart.so"
 #endif
 
 static HMODULE hCuda = nullptr;
@@ -133,6 +137,16 @@ static int initCUDA()
 
 	if (hCuda)
 	{
+		// Check if CUDA device is available
+		FUNC_CUDA(cudaGetDeviceCount) = (FTcudaGetDeviceCount)GetProcAddress(hCuda, "cudaGetDeviceCount");
+		if (!FUNC_CUDA(cudaGetDeviceCount))
+			return -1;
+
+		int deviceCount = 0;
+		cudaGetDeviceCount(&deviceCount);
+		if (deviceCount == 0)
+			return -1;
+
 		FUNC_CUDA(cudaGetLastError) = (FTcudaGetLastError)GetProcAddress(hCuda, "cudaGetLastError");
 		FUNC_CUDA(cudaGetErrorString) = (FTcudaGetErrorString)GetProcAddress(hCuda, "cudaGetErrorString");
 
@@ -147,7 +161,7 @@ static int initCUDA()
 
 		FUNC_CUDA(cudaGraphicsGLRegisterImage) = (FTcudaGraphicsGLRegisterImage)GetProcAddress(hCuda, "cudaGraphicsGLRegisterImage");
 		FUNC_CUDA(cudaGraphicsGLRegisterBuffer) = (FTcudaGraphicsGLRegisterBuffer)GetProcAddress(hCuda, "cudaGraphicsGLRegisterBuffer");
-		
+
 #if defined(__WIN32__)
 		FUNC_CUDA(cudaGraphicsD3D11RegisterResource) = (FTcudaGraphicsD3D11RegisterResource)GetProcAddress(hCuda, "cudaGraphicsD3D11RegisterResource");
 #endif
@@ -166,6 +180,8 @@ static int initCUDA()
 		FUNC_CUDA(cudaMemcpy2DToArrayAsync) = (FTcudaMemcpy2DToArrayAsync)GetProcAddress(hCuda, "cudaMemcpy2DToArrayAsync");
 		FUNC_CUDA(cudaMemcpyArrayToArray) = (FTcudaMemcpyArrayToArray)GetProcAddress(hCuda, "cudaMemcpyArrayToArray");
 	}
+	else
+		return -1;
 
 	if (!FUNC_CUDA(cudaGetLastError) || !FUNC_CUDA(cudaGetErrorString) ||
 		!FUNC_CUDA(cudaMalloc) || !FUNC_CUDA(cudaMemset) || !FUNC_CUDA(cudaFree) ||
