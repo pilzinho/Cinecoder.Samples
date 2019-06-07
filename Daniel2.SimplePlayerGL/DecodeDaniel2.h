@@ -33,6 +33,7 @@ private:
 	bool m_bInitDecoder;
 	bool m_bUseCuda;
 	bool m_bUseCudaHost;
+	bool m_bForce8Bit;
 
 	ReadFileDN2 m_file;
 
@@ -58,7 +59,7 @@ public:
 	~DecodeDaniel2();
 
 public:
-	int OpenFile(const char* const filename, size_t iMaxCountDecoders = 2, bool useCuda = false);
+	int OpenFile(const char* const filename, size_t iMaxCountDecoders = 2, bool useCuda = false, bool force8Bit = false);
 	int StartDecode();
 	int StopDecode();
 
@@ -90,6 +91,9 @@ public:
 
 	double GetFrameRate() { return ((double)m_FrameRate.num / (double)m_FrameRate.denom); }
 	CC_FRAME_RATE GetFrameRateValue() { return m_FrameRate; }
+    CC_CHROMA_FORMAT GetChromaFormat() { return m_ChromaFormat; }
+    CC_COLOR_FMT GetColorFormat() { return m_fmt; }
+    DWORD GetBitDepth() { return m_BitDepth; }
 
 #if defined(__WIN32__)
 private:

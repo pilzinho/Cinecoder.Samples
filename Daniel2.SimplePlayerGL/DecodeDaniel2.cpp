@@ -71,9 +71,10 @@ DecodeDaniel2::~DecodeDaniel2()
 	m_file.CloseFile(); // close reading DN2 file
 }
 
-int DecodeDaniel2::OpenFile(const char* const filename, size_t iMaxCountDecoders, bool useCuda)
+int DecodeDaniel2::OpenFile(const char* const filename, size_t iMaxCountDecoders, bool useCuda, bool force8Bit)
 {
 	m_bInitDecoder = false;
+	m_bForce8Bit = force8Bit;
 
 	m_bUseCuda = useCuda;
 
@@ -635,11 +636,14 @@ HRESULT STDMETHODCALLTYPE DecodeDaniel2::DataReady(IUnknown *pDataProducer)
 #endif
 
 		CC_COLOR_FMT fmt = CCF_B8G8R8A8; // set output format
-
-		if (BitDepth > 8) fmt = fmt == CCF_B8G8R8A8 ? CCF_B16G16R16A16 : CCF_R16G16B16A16;
+            if (!m_bForce8Bit && BitDepth > 8) fmt = fmt == CCF_B8G8R8A8 ? CCF_B16G16R16A16 : CCF_R16G16B16A16;
 
 #if defined(__WIN32__)
-		if (m_bUseCuda && ChromaFormat == CC_CHROMA_422) fmt = BitDepth == 8 ? CCF_YUY2 : CCF_Y216;
+			//if (m_bUseCuda && ChromaFormat == CC_CHROMA_422) fmt = BitDepth == 8 ? CCF_YUY2 : CCF_Y216;
+			if (ChromaFormat == CC_CHROMA_422) fmt = BitDepth == 8 ? CCF_YUY2 : CCF_Y216;
+
+			if (m_bForce8Bit && !m_bUseCuda && fmt == CCF_Y216)
+				fmt = CCF_YUY2;
 #endif
 
 		CC_BOOL bRes = CC_FALSE;
