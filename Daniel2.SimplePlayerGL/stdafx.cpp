@@ -5,6 +5,7 @@
 #include "stdafx.h"
 
 #ifdef USE_CUDA_SDK // CUDA
+FTcudaGetDeviceCount FUNC_CUDA(cudaGetDeviceCount) = nullptr;
 FTcudaGetLastError FUNC_CUDA(cudaGetLastError) = nullptr;
 FTcudaGetErrorString FUNC_CUDA(cudaGetErrorString) = nullptr;
 
