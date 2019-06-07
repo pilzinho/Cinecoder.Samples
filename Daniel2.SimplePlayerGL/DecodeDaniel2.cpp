@@ -48,7 +48,10 @@ DecodeDaniel2::DecodeDaniel2() :
 	m_strStreamType("Unknown"),
 	bIntraFormat(false),
 	m_llDuration(1),
-	m_llTimeBase(1)
+    m_llTimeBase(1),
+    m_pVideoDecD3D11(nullptr),
+    m_pRender(nullptr),
+    m_pCapableAdapter(nullptr)
 {
 	m_FrameRate.num = 60;
 	m_FrameRate.denom = 1;
@@ -365,15 +368,17 @@ int DecodeDaniel2::CreateDecoder(size_t iMaxCountDecoders, bool useCuda)
 		return printf("DecodeDaniel2: put_OutputCallback failed!\n"), hr;
 
 #if defined(__WIN32__)
+    // Only needed when explicitly setup as DX renderer
+	if (m_bUseCuda && m_pRender)
+	{
 	m_pVideoDec->QueryInterface(IID_ICC_D3D11VideoProducer, (void**)&m_pVideoDecD3D11);
-	if (m_bUseCuda && m_pVideoDecD3D11 && m_pRender)
+        if (m_pVideoDecD3D11)
 	{
 		IDXGIAdapter1* pCapableAdapter = m_pCapableAdapter;
-
 		if (FAILED(hr = m_pVideoDecD3D11->AssignAdapter(pCapableAdapter)))
 			return printf("DecodeDaniel2: AssignAdapter failed!\n"), hr;
 	}
-	else m_pVideoDecD3D11 = nullptr;
+	}
 #endif
 
 	// init decoder
