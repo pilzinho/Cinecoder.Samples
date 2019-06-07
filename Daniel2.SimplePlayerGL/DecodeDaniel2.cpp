@@ -17,6 +17,21 @@
 #undef min
 #endif
 
+std::string GetCinecoderVersion()
+{
+	CC_VERSION_INFO version = Cinecoder_GetVersion(); // get version of Cinecoder
+	std::string strCinecoderVersion = "Cinecoder # ";
+	strCinecoderVersion += std::to_string((long long)version.VersionHi);
+	strCinecoderVersion += ".";
+	strCinecoderVersion += std::to_string((long long)version.VersionLo);
+	strCinecoderVersion += ".";
+	strCinecoderVersion += std::to_string((long long)version.EditionNo);
+	strCinecoderVersion += ".";
+	strCinecoderVersion += std::to_string((long long)version.RevisionNo);
+
+	return strCinecoderVersion;
+}
+
 DecodeDaniel2::DecodeDaniel2() :
 	m_width(3840),
 	m_height(2160),
@@ -246,20 +261,7 @@ int DecodeDaniel2::CreateDecoder(size_t iMaxCountDecoders, bool useCuda)
 	if (FAILED(hr)) 
 		return printf("DecodeDaniel2: AssignLicense failed!\n"), hr;
 
-	CC_VERSION_INFO version = Cinecoder_GetVersion(); // get version of Cinecoder
-
-	std::string strCinecoderVersion;
-
-	strCinecoderVersion = "Cinecoder # ";
-	strCinecoderVersion += std::to_string((long long)version.VersionHi);
-	strCinecoderVersion += ".";
-	strCinecoderVersion += std::to_string((long long)version.VersionLo);
-	strCinecoderVersion += ".";
-	strCinecoderVersion += std::to_string((long long)version.EditionNo);
-	strCinecoderVersion += ".";
-	strCinecoderVersion += std::to_string((long long)version.RevisionNo);
-
-	printf("%s\n", strCinecoderVersion.c_str()); // print version of Cinecoder
+    printf("%s\n", GetCinecoderVersion().c_str()); // print version of Cinecoder
 
 #if defined(__WIN32__)
 	LoadPlugin("Cinecoder.Plugin.GpuCodecs.dll");

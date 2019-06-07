@@ -10,6 +10,8 @@ enum BUFFER_FORMAT { BUFFER_FORMAT_RGBA32, BUFFER_FORMAT_RGBA64, BUFFER_FORMAT_Y
 class GPURenderDX;
 #endif
 
+std::string GetCinecoderVersion();
+
 class DecodeDaniel2 : public C_SimpleThread<DecodeDaniel2>, public ICC_DataReadyCallback
 {
 private:
