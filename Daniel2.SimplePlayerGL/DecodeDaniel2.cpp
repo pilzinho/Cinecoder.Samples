@@ -9,6 +9,8 @@
 #endif
 #include "CinecoderErrorHandler.h"
 
+#define BUFFERED_FRAMES 3
+
 #ifdef max
 #undef max
 #endif
@@ -16,6 +18,9 @@
 #ifdef min
 #undef min
 #endif
+
+using namespace std;
+using namespace std::chrono;
 
 std::string GetCinecoderVersion()
 {
@@ -39,6 +44,8 @@ DecodeDaniel2::DecodeDaniel2() :
     m_outputBufferFormat(BUFFER_FORMAT_RGBA32),
     m_bProcess(false),
     m_bPause(false),
+    m_bLoop(false),
+    m_bSeek(false),
     m_bDecode(true),
     m_bInitDecoder(false),
     m_bUseCuda(false),
@@ -142,9 +149,6 @@ int DecodeDaniel2::OpenFile(const char* const filename, size_t iMaxCountDecoders
         res = InitValues(); // init values
     }
 
-    if (res == 0)
-        m_file.StartPipe(); // if initialize was successful, starting pipeline for reading DN2 file
-
     if (res == 0) // printing parameters such as: filename, size of frame, format image
     {
         printf("-------------------------------------\n");
@@ -199,6 +203,8 @@ int DecodeDaniel2::StartDecode()
     if (!m_bInitDecoder)
         return -1;
 
+    m_file.StartPipe(); // starting pipeline for reading DN2 file
+
     Create(); // creating thread <ThreadProc>
 
     return 0;
@@ -206,8 +212,9 @@ int DecodeDaniel2::StartDecode()
 
 int DecodeDaniel2::StopDecode()
 {
-    // stop main thread of decode
+    m_file.StopPipe();
 
+    // stop main thread of decode
     m_bProcess = false;
 
     Close(); // closing thread <ThreadProc>
@@ -230,6 +237,12 @@ void DecodeDaniel2::UnmapFrame(C_Block* pBlock)
     {
         m_queueFrames_free.Queue(pBlock); // adding a block (C_Block) to the queue for processing (free frame queue)
     }
+}
+
+size_t DecodeDaniel2::SeekFrame(size_t nFrame)
+{
+    m_bSeek = (m_iSeekFrame = m_file.SeekFrame(nFrame)) >= 0;
+    return m_iSeekFrame;
 }
 
 void DecodeDaniel2::SetErrorHandler(ICC_ErrorHandler* const handler)
@@ -409,7 +422,7 @@ int DecodeDaniel2::DestroyDecoder()
 
 int DecodeDaniel2::InitValues()
 {
-    size_t iCountBlocks = 5; // set count of blocks in queue
+    size_t iCountBlocks = BUFFERED_FRAMES; // set count of blocks in queue
 
     int res = 0;
 
@@ -529,7 +542,7 @@ HRESULT STDMETHODCALLTYPE DecodeDaniel2::DataReady(IUnknown *pDataProducer)
                     {
                         hr = pVideoProducer->GetFrame(m_fmt, pBlock->DataPtr(), (DWORD)pBlock->Size(), (INT)pBlock->Pitch(), &cb); // get decoded frame from Cinecoder
                         __check_hr
-                            pBlock->CopyToGPU(); // copy frame from host to device memory
+                        pBlock->CopyToGPU(); // copy frame from host to device memory
                     }
                     else
                     {
@@ -579,7 +592,7 @@ HRESULT STDMETHODCALLTYPE DecodeDaniel2::DataReady(IUnknown *pDataProducer)
                         pBlock->iFrameNumber = static_cast<size_t>(PTS) / m_llDuration; // save PTS (in our case this is the frame number)
                     else
                         pBlock->iFrameNumber = (PTS * m_FrameRate.num) / (m_llTimeBase * m_FrameRate.denom);
-
+                
                 m_queueFrames.Queue(pBlock); // add pointer to object of C_Block with final picture to queue
             }
         }
@@ -776,64 +789,72 @@ long DecodeDaniel2::ThreadProc()
 
     while (m_bProcess)
     {
-        if (m_bPause)
+        if (m_bPause && !m_bSeek)
         {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            this_thread::sleep_for(milliseconds(10));
             continue;
         }
 
         CodedFrame* frame = nullptr;
-        frame = m_file.MapFrame(); // get pointer to next coded frame form DN2 file
-
-        if (frame)
+        if (!(frame = m_file.MapFrame())) // get pointer to next coded frame form DN2 file
         {
-            coded_frame = frame->coded_frame.GetPtr(); // poiter to coded frame
-            coded_frame_size = frame->coded_frame_size; // size of coded frame
-            frame_number = frame->frame_number; // number of coded frame
+            this_thread::sleep_for(milliseconds(1));
+            continue;
+        }
 
-            if (m_bDecode)
+        coded_frame = frame->coded_frame.GetPtr(); // poiter to coded frame
+        coded_frame_size = frame->coded_frame_size; // size of coded frame
+        frame_number = frame->frame_number; // number of coded frame
+
+        if (m_bDecode)
+        {
+            CC_TIME pts = (frame_number * m_llTimeBase * m_FrameRate.denom) / m_FrameRate.num;
+
+            if (frame_number == 0 || frame->flags == 1) // flag 1 means this frame was seeked to
             {
-                CC_TIME pts = (frame_number * m_llTimeBase * m_FrameRate.denom) / m_FrameRate.num;
-
-                if (frame_number == 0 || frame->flags == 1) // seek
-                {
-                    hr = m_pVideoDec->Break(CC_TRUE); __check_hr
-                        if (SUCCEEDED(hr)) hr = m_pVideoDec->ProcessData(coded_frame, static_cast<CC_UINT>(coded_frame_size), 0, pts); __check_hr
+                if (frame->flags == 1 && frame->frame_number == m_iSeekFrame) {
+                    m_bSeek = false;
                 }
-                else
-                {
-                    if (bIntraFormat)
-                        hr = m_pVideoDec->ProcessData(coded_frame, static_cast<CC_UINT>(coded_frame_size), 0, pts);
-                    else
-                        hr = m_pVideoDec->ProcessData(coded_frame, static_cast<CC_UINT>(coded_frame_size)); __check_hr
-                }
-
-                if (FAILED(hr)) // add coded frame to decoder
-                {
-                    assert(0);
-
-                    printf("ProcessData failed hr=%d coded_frame_size=%zu coded_frame=%p frame_number = %zd\n", hr, coded_frame_size, coded_frame, frame_number);
-
-                    hr = m_pVideoDec->Break(CC_FALSE); // break decoder with param CC_FALSE (without flush data to DataReady)
-
-                    __check_hr
-                }
+                hr = m_pVideoDec->Break(CC_TRUE); __check_hr
+                if (SUCCEEDED(hr)) 
+                    hr = m_pVideoDec->ProcessData(coded_frame, static_cast<CC_UINT>(coded_frame_size), 0, pts); __check_hr
             }
             else
             {
-                C_Block *pBlock = nullptr;
-
-                m_queueFrames_free.Get(&pBlock, m_evExit); // get free pointer to object of C_Block form queue
-
-                if (pBlock)
-                {
-                    pBlock->iFrameNumber = frame_number; // save frame number
-                    m_queueFrames.Queue(pBlock); // add pointer to object of C_Block with final picture to queue
-                }
+                if (bIntraFormat)
+                    hr = m_pVideoDec->ProcessData(coded_frame, static_cast<CC_UINT>(coded_frame_size), 0, pts);
+                else
+                    hr = m_pVideoDec->ProcessData(coded_frame, static_cast<CC_UINT>(coded_frame_size)); __check_hr
             }
 
-            m_file.UnmapFrame(frame); // add to queue free pointer for reading coded frame
+            if (FAILED(hr)) // add coded frame to decoder
+            {
+                assert(0);
+
+                printf("ProcessData failed hr=%d coded_frame_size=%zu coded_frame=%p frame_number = %zd\n", hr, coded_frame_size, coded_frame, frame_number);
+
+                hr = m_pVideoDec->Break(CC_FALSE); // break decoder with param CC_FALSE (without flush data to DataReady)
+
+                __check_hr
+            }
         }
+        else
+        {
+            C_Block *pBlock = nullptr;
+
+            m_queueFrames_free.Get(&pBlock, m_evExit); // get free pointer to object of C_Block form queue
+
+            if (pBlock)
+            {
+                pBlock->iFrameNumber = frame_number; // save frame number
+                m_queueFrames.Queue(pBlock); // add pointer to object of C_Block with final picture to queue
+            }
+        }
+
+        if (frame_number >= GetCountFrames() && !m_bLoop)
+            m_bPause = true;
+
+        m_file.UnmapFrame(frame); // add to queue free pointer for reading coded frame
     }
 
     m_pVideoDec->Break(CC_FALSE); // break decoder with param CC_FALSE (without flush data to DataReady)

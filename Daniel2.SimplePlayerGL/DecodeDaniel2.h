@@ -29,11 +29,15 @@ private:
 
 	bool m_bProcess;
 	bool m_bPause;
+    bool m_bLoop;
+    std::atomic_bool m_bSeek;
 	bool m_bDecode;
 	bool m_bInitDecoder;
 	bool m_bUseCuda;
 	bool m_bUseCudaHost;
 	bool m_bForce8Bit;
+
+    size_t m_iSeekFrame = 0;
 
 	ReadFileDN2 m_file;
 
@@ -77,10 +81,12 @@ public:
 	bool isPause() { return m_bPause; }
 	bool isDecode() { return m_bDecode; }
 
-	void SetPause(bool bPause) { m_bPause = bPause; }
+    void SetPause(bool bPause) { m_bPause = bPause; m_file.SetPause(bPause); }
 	void SetDecode(bool bDecode) { m_bDecode = bDecode; }
 
-	void SeekFrame(size_t nFrame) { m_file.SeekFrame(nFrame); }
+    void SetLoop(bool bLoop) { m_bLoop = bLoop; m_file.SetLoop(bLoop); }
+
+    size_t SeekFrame(size_t nFrame);
 
 	void SetSpeed(int iSpeed) { if (bIntraFormat) m_file.SetSpeed(iSpeed); }
 	int GetSpeed() { return m_file.GetSpeed(); }

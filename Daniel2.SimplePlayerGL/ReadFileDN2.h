@@ -122,6 +122,8 @@ private:
 
 	bool m_bProcess;
 	bool m_bReadFile;
+    bool m_bPause;
+    bool m_bLoop;
 
 	std::list<CodedFrame> m_listFrames;
 
@@ -150,25 +152,23 @@ public:
 
 	int ReadFrame(size_t frame, C_Buffer & buffer, size_t & size);
 
-	size_t GetCountFrames()
-	{ 
-		CC_UINT frames = 0; 
-		m_fileMvx->get_Length(&frames); 
-		return (size_t)frames; 
-	}
-	void SeekFrame(size_t nFrame) 
-	{ 
-		if (nFrame < m_frames) 
-		{ 
-			m_bSeek = true; 
-			m_iSeekFrame = nFrame;
+    size_t GetCountFrames() { return m_frames; }
 
-			CC_MVX_ENTRY Idx;
-			if (SUCCEEDED(m_fileMvx->FindKeyEntry((CC_UINT)nFrame, &Idx)))
-			{
-				m_iSeekFrame = Idx.CodingOrderNum;
-			}
-		} 
+    size_t SeekFrame(size_t nFrame)
+	{ 
+        if (nFrame < 0) 
+            nFrame = 0;
+        else if (nFrame > m_frames) 
+            nFrame = m_frames;
+
+        m_iSeekFrame = -1;
+		CC_MVX_ENTRY Idx;
+        if (SUCCEEDED(m_fileMvx->FindKeyEntry((CC_UINT)nFrame, &Idx)))
+        {
+            m_iSeekFrame = Idx.CodingOrderNum;
+            m_bSeek = true;
+        }
+        return m_iSeekFrame;
 	}
 	void SetSpeed(int iSpeed)
 	{
@@ -179,6 +179,10 @@ public:
 	{
 		return m_iSpeed;
 	}
+    void SetPause(bool bPause) { m_bPause = bPause; }
+
+    void SetLoop(bool bLoop) { m_bLoop = bLoop; }
+
 	CC_ELEMENTARY_STREAM_TYPE GetStreamType()
 	{
 		CC_ELEMENTARY_STREAM_TYPE type;

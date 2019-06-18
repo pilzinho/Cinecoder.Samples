@@ -1,10 +1,14 @@
 #include "stdafx.h"
 #include "ReadFileDN2.h"
 
+#define BUFFERED_FRAMES 5
+
 ReadFileDN2::ReadFileDN2() :
 	m_bProcess(false),
 	m_bReadFile(false),
 	m_bSeek(false),
+    m_bPause(false),
+    m_bLoop(false),
 	m_iSpeed(1)
 {
 #ifdef __FILE_READ__
@@ -73,11 +77,12 @@ int ReadFileDN2::OpenFile(const char* filename)
 	CC_UINT lenght = 0;
 	hr = m_fileMvx->get_Length(&lenght);
 
-	m_frames = (CC_UINT)lenght;
+    // Reduce by one here so we don't have to do it everywhere where the frame count is needed
+	m_frames = (CC_UINT)lenght - 1;
 
 	////////////////////////////
 
-	size_t iCountFrames = 7;
+	size_t iCountFrames = BUFFERED_FRAMES;
 
 	for (size_t i = 0; i < iCountFrames; i++)
 	{
@@ -126,7 +131,7 @@ int ReadFileDN2::ReadFrame(size_t frame, C_Buffer & buffer, size_t & size)
 {
 	C_AutoLock lock(&m_critical_read);
 
-	if (frame >= m_frames)
+	if (frame > m_frames)
 		return -1;
 
 #ifdef __STD_READ__
@@ -177,7 +182,8 @@ CodedFrame* ReadFileDN2::MapFrame()
 
 	CodedFrame *pFrame = nullptr;
 
-	m_queueFrames.Get(&pFrame, m_evExit);
+    m_queueFrames.Get(&pFrame, m_evExit);
+	//m_queueFrames.SoftGet(&pFrame);
 
 	return pFrame;
 }
@@ -194,7 +200,7 @@ void ReadFileDN2::UnmapFrame(CodedFrame* pFrame)
 
 long ReadFileDN2::ThreadProc()
 {
-	int iCurEncodedFrame = 0;
+	size_t iCurEncodedFrame = 0;
 
 	m_bProcess = true;
 	m_bReadFile = true;
@@ -206,8 +212,13 @@ long ReadFileDN2::ThreadProc()
 
 	while (m_bProcess)
 	{
-		CodedFrame* frame = nullptr;
+        if (m_bPause && !m_bSeek && !bSeek)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }        
 
+		CodedFrame* frame = nullptr;
 		m_queueFrames_free.Get(&frame, m_evExit);
 
 		if (frame)
@@ -220,43 +231,53 @@ long ReadFileDN2::ThreadProc()
 				data_rate += frame->coded_frame_size;
 			}
 			
-			frame->flags = 0;
-			if (bSeek) { frame->flags = 1; bSeek = false; }
-
-			frame->frame_number = iCurEncodedFrame;
-			m_queueFrames.Queue(frame);
-
-			if (res != 0)
-			{
-				assert(0);
-				printf("ReadFrame failed res=%d coded_frame_size=%zu coded_frame=%p\n", res, frame->coded_frame_size, frame->coded_frame.GetPtr());
-			}
+            if (res != 0)
+            {
+                assert(0);
+                printf("ReadFrame failed res=%d coded_frame_size=%zu coded_frame=%p\n", res, frame->coded_frame_size, frame->coded_frame.GetPtr());
+            }
+            else 
+            {
+                frame->flags = 0;
+                if (bSeek) 
+                { 
+                    frame->flags = 1; 
+                    bSeek = false;
+                }
+                frame->frame_number = iCurEncodedFrame;
+                m_queueFrames.Queue(frame);
+            }
 		}
 
 		iCurEncodedFrame += m_iSpeed;
 
-		if (iCurEncodedFrame >= (int)m_frames)
-			iCurEncodedFrame = 0;
+        if (iCurEncodedFrame > m_frames) 
+        {
+            iCurEncodedFrame = 0;
+            if (!m_bLoop)
+                m_bPause = true;
+        }
 		else if (iCurEncodedFrame < 0)
-			iCurEncodedFrame = (int)m_frames - 1;
+			iCurEncodedFrame = m_frames;
 
-		if (m_bSeek)
-		{
-			{
-				C_AutoLock lock(&m_critical_queue);
-				for (size_t i = 0; i < m_queueFrames.GetCount(); ++i)
-				{
-					CodedFrame *pFrame = nullptr;
-					m_queueFrames.Get(&pFrame, m_evExit);
-					if (pFrame)
-						m_queueFrames_free.Queue(pFrame);
-				}
-			}
+        if (m_bSeek)
+        {
+            {
+                C_AutoLock lock(&m_critical_queue);
+                while (!m_queueFrames.Empty())
+                {
+                    CodedFrame *pFrame = nullptr;
+                    m_queueFrames.Get(&pFrame, m_evExit);
+                    if (pFrame)
+                        m_queueFrames_free.Queue(pFrame);
+                }
+                assert(m_queueFrames.Empty());
+            }
 
-			iCurEncodedFrame = (int)m_iSeekFrame;
-			m_bSeek = false;
-			bSeek = true;
-		}
+            iCurEncodedFrame = m_iSeekFrame;
+            m_bSeek = false;
+            bSeek = true;
+        }
 	}
 
 	return 0;
