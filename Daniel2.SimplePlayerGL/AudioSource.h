@@ -16,23 +16,7 @@
 #include <AL/alc.h>
 #endif
 
-#ifndef NDEBUG
-	#define __al { \
-	ALuint alRes = alGetError(); \
-	if (alRes != AL_NO_ERROR) { \
-	printf("al error = 0x%x line = %d\n", alRes, __LINE__); \
-	return alRes; \
-	} }
 
-#define __al_void { \
-	ALuint alRes = alGetError(); \
-	if (alRes != AL_NO_ERROR) { \
-	printf("al error = 0x%x line = %d\n", alRes, __LINE__); \
-	} }
-#else
-	#define __al
-	#define __al_void
-#endif
 
 #define NUM_BUFFERS 6
 
@@ -57,8 +41,8 @@ private:
 
 	CC_FRAME_RATE m_FrameRate;
 
-	ALCdevice *device;
-	ALCcontext *context;
+	//ALCdevice *device;
+	//ALCcontext *context;
 
 	ALuint source;
 	ALuint buffers[NUM_BUFFERS];
@@ -75,7 +59,7 @@ public:
 
 public:
 	int Init(CC_FRAME_RATE video_framerate);
-	int OpenFile(const char* const filename);
+	int OpenFile(const char* const filename, const bool autoPlay = true);
 	int PlayFrame(size_t iFrame);
 	int SetPause(bool bPause);
 
@@ -87,26 +71,15 @@ public:
 		m_iSpeed = iSpeed;
 	}
 
-	void SetVolume(float fVolume)
-	{
-		if (fVolume >= 0.f && fVolume <= 1.f)
-		{
-			alSourcef(source, AL_GAIN, fVolume); __al_void
-		}
-	}
+    void SetVolume(float fVolume);
 
-	float GetVolume()
-	{
-		float fVolume = 0;
-		alGetSourcef(source, AL_GAIN, &fVolume); __al_void
+    float GetVolume();
 
-		return fVolume;
-	}
+    int Play(const size_t frameNumber);
 
 private:
-	int InitOpenAL();
-	int DestroyOpenAL();
-	int PrintVersionAL();
+    int InitSource();
+    int DestroySource();
 
 	HRESULT UpdateAudioChunk(size_t iFrame, ALvoid** data, ALsizei* size);
 

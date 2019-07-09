@@ -1,10 +1,32 @@
 #include "stdafx.h"
 #include "AudioSource.h"
+#include "three10_Video/VideoLog.h"
+
+using namespace std;
+using namespace std::chrono;
 
 #if defined(__APPLE__) || defined(__LINUX__)
 typedef signed char INT8;
 typedef signed short INT16;
 typedef long long UINT64;
+#endif
+
+#ifndef NDEBUG
+#define __al { \
+	ALuint alRes = alGetError(); \
+	if (alRes != AL_NO_ERROR) { \
+	LogError("al error = 0x%x line = %d\n", alRes, __LINE__); \
+	return alRes; \
+	} }
+
+#define __al_void { \
+	ALuint alRes = alGetError(); \
+	if (alRes != AL_NO_ERROR) { \
+	LogError("al error = 0x%x line = %d\n", alRes, __LINE__); \
+	} }
+#else
+#define __al
+#define __al_void
 #endif
 
 static void ReverseSamples(BYTE *p, int iSize, int nBlockAlign)
@@ -70,8 +92,6 @@ static void list_audio_devices(const ALCchar *devices)
 
 AudioSource::AudioSource() :
 	m_bInitialize(false),
-	device(nullptr),
-	context(nullptr),
 	source(0),
 	buffers{ 0 },
 	m_FrameRate{ 25, 1 },
@@ -86,9 +106,7 @@ AudioSource::~AudioSource()
 	m_bProcess = false;
 
 	Close(); // closing thread <ThreadProc>
-
-	if (m_bInitialize)
-		DestroyOpenAL();
+    DestroySource();
 }
 
 int AudioSource::Init(CC_FRAME_RATE video_framerate)
@@ -98,104 +116,68 @@ int AudioSource::Init(CC_FRAME_RATE video_framerate)
 	return 0;
 }
 
-int AudioSource::InitOpenAL()
+int AudioSource::Play(const size_t frameNumber)
 {
-	//list_audio_devices(alcGetString(NULL, ALC_DEVICE_SPECIFIER));
+    ALvoid* data = nullptr;
+    ALsizei size = 0;
+    if (UpdateAudioChunk(frameNumber, &data, &size) == S_OK && data && size > 0)
+    {
+        ALsizei frequency = static_cast<ALsizei>(m_iSampleRate);
+        ALenum  format = (m_iNumChannels == 2) ? AL_FORMAT_STEREO16 : AL_FORMAT_MONO16;
 
-	device = alcOpenDevice(NULL);
-	//device = alcOpenDevice((ALchar*)"DirectSound3D");
+        ALuint buffer;
 
-	context = alcCreateContext(device, NULL);
-
-	if (!alcMakeContextCurrent(context))
-		return -1;
-
-	alGetError(); /* clear error */
-
-	ALfloat listenerOri[] = { 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f };
-
-	alListener3f(AL_POSITION, 0, 0, 1.0f); __al
-	alListener3f(AL_VELOCITY, 0, 0, 0); __al
-	alListenerfv(AL_ORIENTATION, listenerOri); __al
-
-	alGenBuffers(NUM_BUFFERS, buffers); __al
-	alGenSources(1, &source); __al
-
-	alSourcef(source, AL_PITCH, 1); __al
-	alSourcef(source, AL_GAIN, 1); __al
-	alSource3f(source, AL_POSITION, 0, 0, 0); __al
-	alSource3f(source, AL_VELOCITY, 0, 0, 0); __al
-	alSourcei(source, AL_LOOPING, AL_FALSE); __al
-
-	for (size_t i = 0; i < NUM_BUFFERS; i++)
-	{
-		HRESULT hr = S_OK;
-		DWORD cbRetSize = 0;
-
-		BYTE* pb = audioChunk.data();
-		DWORD cb = static_cast<DWORD>(audioChunk.size());
-
-		hr = m_pMediaReader->GetAudioSamples(CAF_PCM16, i * m_iSampleCount, (CC_UINT)m_iSampleCount, pb, cb, &cbRetSize);
-		if (SUCCEEDED(hr) && cbRetSize > 0)
-		{
-			ALvoid* data = pb;
-			ALsizei size = static_cast<ALsizei>(cbRetSize);
-			ALsizei frequency = static_cast<ALsizei>(m_iSampleRate);
-			ALenum  format = (m_iNumChannels == 2) ? AL_FORMAT_STEREO16 : AL_FORMAT_MONO16;
-
-			alBufferData(buffers[i], format, data, size, frequency); __al
-		}
-	}
-
-	alSourceQueueBuffers(source, NUM_BUFFERS, buffers); __al
-
-	alSourcePlay(source); __al
-
-	m_bInitialize = true;
-
-	PrintVersionAL();
-
-	Create(); // creating thread <ThreadProc>
-
-	return 0;
+        alSourceUnqueueBuffers(source, 1, &buffer); __al
+        alBufferData(buffer, format, data, size, frequency); __al
+        alSourceQueueBuffers(source, 1, &buffer); __al
+    }
 }
 
-int AudioSource::DestroyOpenAL()
+int AudioSource::InitSource()
+{
+    alGenBuffers(NUM_BUFFERS, buffers); __al
+    alGenSources(1, &source); __al
+
+    alSourcef(source, AL_PITCH, 1); __al
+    alSourcef(source, AL_GAIN, 1); __al
+    alSource3f(source, AL_POSITION, 0, 0, 0); __al
+    alSource3f(source, AL_VELOCITY, 0, 0, 0); __al
+    alSourcei(source, AL_LOOPING, AL_FALSE); __al
+
+    for (size_t i = 0; i < NUM_BUFFERS; i++)
+    {
+        HRESULT hr = S_OK;
+        DWORD cbRetSize = 0;
+
+        BYTE* pb = audioChunk.data();
+        DWORD cb = static_cast<DWORD>(audioChunk.size());
+
+        hr = m_pMediaReader->GetAudioSamples(CAF_PCM16, i * m_iSampleCount, (CC_UINT)m_iSampleCount, pb, cb, &cbRetSize);
+        if (SUCCEEDED(hr) && cbRetSize > 0)
+        {
+            ALvoid* data = pb;
+            ALsizei size = static_cast<ALsizei>(cbRetSize);
+            ALsizei frequency = static_cast<ALsizei>(m_iSampleRate);
+            ALenum  format = (m_iNumChannels == 2) ? AL_FORMAT_STEREO16 : AL_FORMAT_MONO16;
+
+            alBufferData(buffers[i], format, data, size, frequency); __al
+        }
+    }
+
+    alSourceQueueBuffers(source, NUM_BUFFERS, buffers); __al
+    m_bInitialize = true;
+    Create(); // creating thread <ThreadProc>
+}
+
+int AudioSource::DestroySource()
 {
 	alDeleteSources(1, &source); __al
 	alDeleteBuffers(NUM_BUFFERS, buffers); __al
 
-	device = alcGetContextsDevice(context); __al
-	alcMakeContextCurrent(NULL); __al
-	alcDestroyContext(context); __al
-	alcCloseDevice(device); __al
-
 	return 0;
 }
 
-int AudioSource::PrintVersionAL()
-{
-	if (!device)
-		return -1;
-
-	static const ALchar alVendor[] = "OpenAL Community";
-	static const ALchar alVersion[] = "1.1 ALSOFT ";
-	static const ALchar alRenderer[] = "OpenAL Soft";
-
-	const ALCchar* _alVendor = alcGetString(device, AL_VENDOR); __al
-	const ALCchar* _alVersion = alcGetString(device, AL_VERSION); __al
-	const ALCchar* _alRenderer = alcGetString(device, AL_RENDERER); __al
-
-	printf("OpenAL vendor : %s\n", _alVendor == nullptr ? alVendor : _alVendor);
-	printf("OpenAL renderer : %s\n", _alVersion == nullptr ? alVersion : _alVersion);
-	printf("OpenAL version : %s\n", _alRenderer == nullptr ? alRenderer : _alRenderer);
-
-	printf("-------------------------------------\n");
-
-	return 0;
-}
-
-int AudioSource::OpenFile(const char* const filename)
+int AudioSource::OpenFile(const char* const filename, const bool autoPlay /*=true*/)
 {
 	HRESULT hr = S_OK;
 
@@ -289,7 +271,10 @@ int AudioSource::OpenFile(const char* const filename)
 
 	audioChunk.resize(sample_bytes);
 
-	return InitOpenAL();
+    if (InitSource() < 0 || SetPause(!autoPlay) < 0)
+        return -1;
+
+    return 0;
 }
 
 int AudioSource::PlayFrame(size_t iFrame)
@@ -317,12 +302,30 @@ int AudioSource::SetPause(bool bPause)
 
 	m_bAudioPause = bPause;
 
-	if (m_bAudioPause)
-	{
-		alSourcePause(source); __al
-	}
+    if (!m_bAudioPause) {
+        alSourcePlay(source); __al
+    }
+    else {
+        alSourcePause(source); __al
+    }
 
 	return 0;
+}
+
+void AudioSource::SetVolume(float fVolume)
+{
+    if (fVolume >= 0.f && fVolume <= 1.f)
+    {
+        alSourcef(source, AL_GAIN, fVolume); __al_void
+    }
+}
+
+float AudioSource::GetVolume()
+{
+    float fVolume = 0;
+    alGetSourcef(source, AL_GAIN, &fVolume); __al_void
+
+        return fVolume;
 }
 
 long AudioSource::ThreadProc()
@@ -340,36 +343,36 @@ long AudioSource::ThreadProc()
 		alGetSourcei(source, AL_SOURCE_STATE, &source_state); __al
 
 		if (numProcessed > 0)
-		{
-			if (queueFrames.size() > 0)
-			{
-				{
-					C_AutoLock lock(&m_CritSec);
+        {
+            if (queueFrames.size() > 0)
+            {
+                {
+                    C_AutoLock lock(&m_CritSec);
 
-					iCurFrame = queueFrames.front();
-					queueFrames.pop();
-				}
+                    iCurFrame = queueFrames.front();
+                    queueFrames.pop();
+                }
 
 				ALvoid* data = nullptr;
 				ALsizei size = 0;
-				if (UpdateAudioChunk(iCurFrame, &data, &size) == S_OK && data && size > 0)
-				{
+                if (UpdateAudioChunk(iCurFrame, &data, &size) == S_OK && data && size > 0)
+                {
 					ALsizei frequency = static_cast<ALsizei>(m_iSampleRate);
 					ALenum  format = (m_iNumChannels == 2) ? AL_FORMAT_STEREO16 : AL_FORMAT_MONO16;
 
 					ALuint buffer;
 
-					alSourceUnqueueBuffers(source, 1, &buffer); __al
+                    alSourceUnqueueBuffers(source, 1, &buffer); __al
 					alBufferData(buffer, format, data, size, frequency); __al
-					alSourceQueueBuffers(source, 1, &buffer); __al
-				}
-			}
-		}
+                   alSourceQueueBuffers(source, 1, &buffer); __al
+                }
+                }
+            }
 
-		if (source_state != AL_PLAYING && !m_bAudioPause)
-		{
-			alSourcePlay(source); __al
-		}
+            if (source_state != AL_PLAYING && !m_bAudioPause)
+            {
+                alSourcePlay(source); __al
+            }
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 	}
