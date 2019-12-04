@@ -156,7 +156,7 @@ int BaseGPURender::InitAudioTrack(std::string filename, CC_FRAME_RATE frameRate)
 		return 0;
 	}
 
-	res = m_decodeAudio->Init(frameRate); // Init audio decoder
+	res = m_decodeAudio->Init(frameRate, m_decodeD2->GetCountFrames()); // Init audio decoder
 
 	if (res != 0)
 		return res;

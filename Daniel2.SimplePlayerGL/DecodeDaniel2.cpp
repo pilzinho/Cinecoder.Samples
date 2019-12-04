@@ -86,6 +86,7 @@ int DecodeDaniel2::OpenFile(const char* const filename, size_t iMaxCountDecoders
 {
     m_bInitDecoder = false;
 	m_bForce8Bit = force8Bit;
+    m_filename = _com_util::ConvertStringToBSTR(filename);
 
     m_bUseCuda = useCuda;
 
@@ -211,7 +212,7 @@ int DecodeDaniel2::StartDecode()
 }
 
 int DecodeDaniel2::StopDecode()
-{
+{    
     m_file.StopPipe();
 
     // stop main thread of decode

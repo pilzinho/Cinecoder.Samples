@@ -5,6 +5,9 @@
 using namespace std;
 using namespace std::chrono;
 
+using Seconds = std::chrono::duration<double>;
+using Clock = std::chrono::high_resolution_clock;
+
 #if defined(__APPLE__) || defined(__LINUX__)
 typedef signed char INT8;
 typedef signed short INT16;
@@ -97,7 +100,8 @@ AudioSource::AudioSource() :
 	m_FrameRate{ 25, 1 },
 	m_bAudioPause(false),
 	m_iSpeed(1),
-	m_bProcess(false)
+	m_bProcess(false),
+    m_iCurrentFrame(0)
 {
 }
 
@@ -109,10 +113,10 @@ AudioSource::~AudioSource()
     DestroySource();
 }
 
-int AudioSource::Init(CC_FRAME_RATE video_framerate)
+int AudioSource::Init(CC_FRAME_RATE video_framerate, const size_t frameCount)
 {
 	m_FrameRate = video_framerate;
-
+    m_iFrameCount = frameCount;
 	return 0;
 }
 
@@ -279,6 +283,7 @@ int AudioSource::OpenFile(const char* const filename, const bool autoPlay /*=tru
 
 int AudioSource::PlayFrame(size_t iFrame)
 {
+    //m_iCurrentFrame = iFrame;
 	if (!m_bInitialize)
 		return -1;
 
@@ -331,50 +336,62 @@ float AudioSource::GetVolume()
 long AudioSource::ThreadProc()
 {
 	m_bProcess = true;
-
-	size_t iCurFrame = NUM_BUFFERS;
+    m_iCurrentFrame = NUM_BUFFERS;
+    double timePerFrame = 1.0 / (m_FrameRate.num / (double)m_FrameRate.denom);
+    Seconds printStatsInterval(1); // Print stats every n seconds
+    auto lastPrintStatsTime = Clock::now();
+    int decodedFps = 0;
 
 	while (m_bProcess)
 	{
+        if (m_bAudioPause)
+        {
+            this_thread::sleep_for(milliseconds(10));
+            continue;
+        }
+
 		ALint numProcessed = 0;
 		alGetSourcei(source, AL_BUFFERS_PROCESSED, &numProcessed); __al
-
-		ALint source_state = 0;
-		alGetSourcei(source, AL_SOURCE_STATE, &source_state); __al
-
-		if (numProcessed > 0)
+		if (numProcessed > 0 /*&& m_iCurrentFrame < m_iFrameCount*/)
         {
             if (queueFrames.size() > 0)
             {
-                {
-                    C_AutoLock lock(&m_CritSec);
-
-                    iCurFrame = queueFrames.front();
-                    queueFrames.pop();
-                }
-
-				ALvoid* data = nullptr;
-				ALsizei size = 0;
-                if (UpdateAudioChunk(iCurFrame, &data, &size) == S_OK && data && size > 0)
-                {
-					ALsizei frequency = static_cast<ALsizei>(m_iSampleRate);
-					ALenum  format = (m_iNumChannels == 2) ? AL_FORMAT_STEREO16 : AL_FORMAT_MONO16;
-
-					ALuint buffer;
-
-                    alSourceUnqueueBuffers(source, 1, &buffer); __al
-					alBufferData(buffer, format, data, size, frequency); __al
-                   alSourceQueueBuffers(source, 1, &buffer); __al
-                }
-                }
+                C_AutoLock lock(&m_CritSec);
+                m_iCurrentFrame = queueFrames.front();
+                queueFrames.pop();
             }
 
-            if (source_state != AL_PLAYING && !m_bAudioPause)
+            ++decodedFps;
+			ALvoid* data = nullptr;
+			ALsizei size = 0;
+            if (UpdateAudioChunk(m_iCurrentFrame/*++*/, &data, &size) == S_OK && data && size > 0)
             {
-                alSourcePlay(source); __al
-            }
+				ALsizei frequency = static_cast<ALsizei>(m_iSampleRate);
+				ALenum  format = (m_iNumChannels == 2) ? AL_FORMAT_STEREO16 : AL_FORMAT_MONO16;
+				ALuint buffer;
 
-		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                alSourceUnqueueBuffers(source, 1, &buffer); __al
+				alBufferData(buffer, format, data, size, frequency); __al
+                alSourceQueueBuffers(source, 1, &buffer); __al                
+            }
+            --numProcessed;
+        }
+
+        ALint source_state = 0;
+        alGetSourcei(source, AL_SOURCE_STATE, &source_state); __al
+        if (source_state != AL_PLAYING && !m_bAudioPause)
+            alSourcePlay(source); __al
+
+        auto statsDuration = duration_cast<Seconds>(Clock::now() - lastPrintStatsTime);
+        if (statsDuration >= printStatsInterval)
+        {
+            LogVerbose("Decoded Audio FPS: %u, Position: %u", decodedFps, m_iCurrentFrame.load());
+            decodedFps = 0;
+            lastPrintStatsTime = Clock::now();
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		//this_thread::sleep_for(Seconds(timePerFrame));
 	}
 
 	return 0;

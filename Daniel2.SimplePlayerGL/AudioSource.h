@@ -39,6 +39,8 @@ private:
 
 	int m_iSpeed;
 
+    std::atomic_size_t m_iCurrentFrame;
+    size_t m_iFrameCount;
 	CC_FRAME_RATE m_FrameRate;
 
 	//ALCdevice *device;
@@ -58,7 +60,7 @@ public:
 	~AudioSource();
 
 public:
-	int Init(CC_FRAME_RATE video_framerate);
+	int Init(CC_FRAME_RATE video_framerate, const size_t frameCount);
 	int OpenFile(const char* const filename, const bool autoPlay = true);
 	int PlayFrame(size_t iFrame);
 	int SetPause(bool bPause);
