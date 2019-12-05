@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "AudioSource.h"
-#include "three10_Video/VideoLog.h"
+#include "three10_Log/PluginLogger.h"
 
 using namespace std;
 using namespace std::chrono;
