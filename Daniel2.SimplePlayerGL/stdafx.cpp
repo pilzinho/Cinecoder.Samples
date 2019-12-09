@@ -14,6 +14,9 @@ FTcudaMemset FUNC_CUDA(cudaMemset) = nullptr;
 FTcudaMemcpy FUNC_CUDA(cudaMemcpy) = nullptr;
 FTcudaFree FUNC_CUDA(cudaFree) = nullptr;
 
+FTcudaMallocHost FUNC_CUDA(cudaMallocHost) = nullptr;
+FTcudaFreeHost FUNC_CUDA(cudaFreeHost) = nullptr;
+
 FTcudaStreamCreate FUNC_CUDA(cudaStreamCreate) = nullptr;
 FTcudaStreamDestroy FUNC_CUDA(cudaStreamDestroy) = nullptr;
 FTcudaStreamSynchronize FUNC_CUDA(cudaStreamSynchronize) = nullptr;
@@ -38,5 +41,8 @@ FTcudaGraphicsResourceSetMapFlags FUNC_CUDA(cudaGraphicsResourceSetMapFlags) = n
 FTcudaMemcpy2DToArray FUNC_CUDA(cudaMemcpy2DToArray) = nullptr;
 FTcudaMemcpy2DToArrayAsync FUNC_CUDA(cudaMemcpy2DToArrayAsync) = nullptr;
 FTcudaMemcpyArrayToArray FUNC_CUDA(cudaMemcpyArrayToArray) = nullptr;
-FTcudaMemcpyToArray FUNC_CUDA(cudaMemcpyToArray) = nullptr;
+
+FTcudaMallocArray FUNC_CUDA(cudaMallocArray) = nullptr;
+FTcudaFreeArray FUNC_CUDA(cudaFreeArray) = nullptr;
+FTcudaCreateChannelDesc FUNC_CUDA(cudaCreateChannelDesc) = nullptr;
 #endif

@@ -5,8 +5,9 @@ using System.Text;
 using System.Threading.Tasks;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using Cinecoder.Interop;
-using Cinecoder.Plugin.Multiplexers.Interop;
+using Cinecoder.Plugin.Multiplexers.Interop.MXF;
 
 namespace Daniel2.MXFTranscoder
 {
@@ -56,7 +57,8 @@ namespace Daniel2.MXFTranscoder
                 Console.WriteLine("Chroma format: {0}{1}", streamInfo.Assigned("ChromaFormat") ? "" : "<unknown>, assuming ", streamInfo.ChromaFormat);
 
                 bool use_cuda = false;
-                var encParams = ParseArgs(args, streamInfo, ref use_cuda);
+                bool enc_looped = false;
+                var encParams = ParseArgs(args, streamInfo, ref use_cuda, ref enc_looped);
 
                 CC_COLOR_FMT exch_fmt =
                     encParams.ChromaFormat == CC_CHROMA_FORMAT.CC_CHROMA_RGB ||
@@ -75,7 +77,10 @@ namespace Daniel2.MXFTranscoder
                 Console.WriteLine($"Aspect ratio : {encParams.AspectRatio.num}:{encParams.AspectRatio.denom}");
                 Console.WriteLine($"Bit depth    : {encParams.BitDepth}");
                 Console.WriteLine($"Chroma format: {encParams.ChromaFormat}");
-                Console.WriteLine($"Bitrate      : {encParams.BitRate/1E6:F2} Mbps");
+                if (encParams.RateMode == CC_BITRATE_MODE.CC_CQ)
+                    Console.WriteLine($"QuantScale   : {encParams.QuantScale}");
+                else
+                    Console.WriteLine($"Bitrate      : {encParams.BitRate / 1E6:F2} Mbps");
                 Console.WriteLine($"Coding method: {encParams.CodingMethod}");
 
                 var decoder = CreateDecoder(VideoFile.StreamType);
@@ -102,42 +107,87 @@ namespace Daniel2.MXFTranscoder
 
                 fileWriter.Create(args[1]);
 
-                Console.WriteLine($"\nTotal frames: {VideoFile.Length}");
+                // audio -------------------------------
+                var audioReader = Factory.CreateInstanceByName("MediaReader") as ICC_MediaReader;
+                audioReader.Open(args[0]);
+
+                int numAudioTracks = audioReader.NumberOfAudioTracks;
+                Console.WriteLine($"\nAudio tracks : {numAudioTracks}");
+
+                int audioBufferSize = 96000 * 16 * 4; // max possible buffer
+                IntPtr audioBuffer = Marshal.AllocHGlobal(audioBufferSize); 
+
+                var audioPins = new ICC_ByteStreamConsumer[numAudioTracks];
+                var audioFmts = new CC_AUDIO_FMT[numAudioTracks];
+
+                for (int i = 0; i < numAudioTracks; i++)
+                {
+                    audioReader.CurrentAudioTrackNumber = i;
+                    var audio_info = audioReader.CurrentAudioTrackInfo;
+
+                    Console.WriteLine($"{i}: Freq = {audio_info.SampleRate}Hz, NumCh = {audio_info.NumChannels}, BitDepth = {audio_info.BitsPerSample}");
+
+                    var pin_descr = Factory.CreateInstanceByName("MXF_MultiplexerPinSettings") as ICC_MXF_MultiplexerPinSettings;
+                    pin_descr.StreamType = CC_ELEMENTARY_STREAM_TYPE.CC_ES_TYPE_AUDIO_LPCM;
+                    pin_descr.FrameRate = encParams.FrameRate;
+                    pin_descr.BitsPerSample = audio_info.BitsPerSample;
+                    pin_descr.NumChannels = audio_info.NumChannels;
+                    pin_descr.SampleRate = audio_info.SampleRate;
+                    audioPins[i] = muxer.CreatePin(pin_descr);
+                    audioFmts[i] = GetAudioFormat(audio_info.NumChannels, audio_info.BitsPerSample);
+                }
+                // audio -------------------------------
+
+                Console.WriteLine($"\nTotal frames: {VideoFile.Length}" + (enc_looped ? ", encoding looped." : ""));
+                Console.WriteLine("Press ESC if you want to stop encoding.");
 
                 long totalFrames = VideoFile.Length;
                 long codedFrames = 0;
                 DateTime t00 = DateTime.Now, t0 = t00;
                 double fps = 0;
-                long i0 = 0;
+                long f = 0, f0 = 0;
 
-                for (long i = 0; i < totalFrames; i++)
+                for (long i = 0; i < totalFrames; i++, f++)
                 {
-                    Console.Write($"\rframe {i} ({i*100.0/totalFrames:F2}%), {fps:F2} fps \b");
+                    Console.Write($"\rframe {f} ({f*100.0/totalFrames:F2}%), {fps:F2} fps \b");
                     var frameData = VideoFile.ReadFrame(i);
 
                     fixed (byte* p = frameData)
                         decoder.ProcessData((IntPtr)p, (uint)frameData.Length);
 
+                    audioReader.CurrentFrameNumber = (int)i;
+                    for (int track = 0; track < numAudioTracks; track++)
+                    {
+                        audioReader.CurrentAudioTrackNumber = track;
+                        var ret_sz = audioReader.GetCurrentAudioFrame(audioFmts[track], audioBuffer, (uint)audioBufferSize);
+                        audioPins[track].ProcessData(audioBuffer, ret_sz);
+                    }
+
                     codedFrames++;
 
                     if (Console.KeyAvailable && Console.ReadKey().Key == ConsoleKey.Escape)
                     {
-                        Console.WriteLine("\nCancelled.");
+                        Console.WriteLine("\nStopped by ESC.");
                         break;
                     }
 
                     DateTime t1 = DateTime.Now;
                     if((t1 - t0).TotalMilliseconds > 500)
                     {
-                        fps = (i - i0) / (t1 - t0).TotalSeconds;
-                        i0 = i;
+                        fps = (f - f0) / (t1 - t0).TotalSeconds;
+                        f0 = f;
                         t0 = t1;
                     }
+
+                    if (enc_looped && i + 1 == totalFrames)
+                        i = -1;
                 }
 
                 decoder.Done(true);
                 encoder.Done(true);
                 muxer.Done(true);
+
+                Marshal.FreeHGlobal(audioBuffer);
 
                 Console.WriteLine($"\nTotal frame(s) processed: {codedFrames}, average fps: {codedFrames/(DateTime.Now-t00).TotalSeconds:F2}, average bitrate: {fileWriter.Length*8/1E6/codedFrames*encParams.FrameRate.num/encParams.FrameRate.denom:F2} Mbps");
 
@@ -153,6 +203,25 @@ namespace Daniel2.MXFTranscoder
 
             return 0;
         }
+
+        static CC_AUDIO_FMT GetAudioFormat(uint num_channels, uint bit_depth)
+		{
+            CC_AUDIO_FMT fmt = 0;
+
+			switch(bit_depth)
+			{
+				case  8: fmt = CC_AUDIO_FMT.CAF_PCM8; break;
+				case 16: fmt = CC_AUDIO_FMT.CAF_PCM16; break;
+				case 24: fmt = CC_AUDIO_FMT.CAF_PCM24; break;
+				case 32: fmt = CC_AUDIO_FMT.CAF_PCM32; break;
+				default: throw new Exception($"Invalid combination of bit_depth({bit_depth}) and num_channels({num_channels})");
+
+            }
+
+			return (CC_AUDIO_FMT)((int)fmt | num_channels);
+		}
+
+
 
         static ICC_VideoDecoder CreateDecoder(CC_ELEMENTARY_STREAM_TYPE type)
         {
@@ -243,10 +312,12 @@ namespace Daniel2.MXFTranscoder
                 "Usage: Daniel2.MXFTranscoder.exe <inputfile.MXF> <output_file.MXF> [<switches>]\n"+
                 "\n"+
                 "Where the switches are:\n"+
-                "  /bitrate=# - the bitrate value is in Mbps\n"+
+                "  /cbr=#     - CBR mode encoding where the arg is the bitrate value is in Mbps\n"+
+                "  /cq=#      - CQ mode encoding where the arg is the quant scale\n" +
                 "  /method=#  - the encoding method (0,[2])\n" +
                 "  /nenc=#    - the number of frame encoders working in a loop ([4])\n" +
                 "  /cuda      - use CUDA encoder\n"+
+                "  /looped    - if you want to loop the source file\n"+
                 "\n"+
                 "The most of the video stream parameters are obtained from the source stream,\n"+
                 "but you can ovveride some of them if you need by the switches:\n"+
@@ -262,7 +333,7 @@ namespace Daniel2.MXFTranscoder
             Console.ReadKey();
         }
 
-        static ICC_DanielVideoEncoderSettings ParseArgs(string[] args, ICC_DanielVideoEncoderSettings src, ref bool use_cuda)
+        static ICC_DanielVideoEncoderSettings ParseArgs(string[] args, ICC_DanielVideoEncoderSettings src, ref bool use_cuda, ref bool enc_looped)
         {
             ICC_DanielVideoEncoderSettings encParams = src;
 
@@ -303,11 +374,17 @@ namespace Daniel2.MXFTranscoder
                 else if (arg == "/chroma=rgba")
                     encParams.ChromaFormat = CC_CHROMA_FORMAT.CC_CHROMA_RGBA;
 
-                else if(arg.StartsWith("/bitrate="))
+                else if(arg.StartsWith("/cbr="))
                 {
-                    int mbs = Int32.Parse(arg.Substring(9));
+                    int mbs = Int32.Parse(arg.Substring(5));
                     encParams.BitRate = mbs * 1000000L;
                     encParams.RateMode = CC_BITRATE_MODE.CC_CBR;
+                }
+
+                else if (arg.StartsWith("/cq="))
+                {
+                    encParams.QuantScale = float.Parse(arg.Substring(4));
+                    encParams.RateMode = CC_BITRATE_MODE.CC_CQ;
                 }
 
                 else if (arg.StartsWith("/method="))
@@ -318,6 +395,11 @@ namespace Daniel2.MXFTranscoder
                 else if (arg == "/cuda")
                 {
                     use_cuda = true;
+                }
+
+                else if (arg == "/looped")
+                {
+                    enc_looped = true;
                 }
 
                 else if (arg.StartsWith("/nenc="))
