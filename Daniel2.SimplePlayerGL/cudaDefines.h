@@ -73,6 +73,7 @@ typedef cudaError_t (*FTcudaGraphicsResourceSetMapFlags)(cudaGraphicsResource_t 
 typedef cudaError_t(*FTcudaMemcpy2DToArray)(cudaArray_t dst, size_t wOffset, size_t hOffset, const void *src, size_t spitch, size_t width, size_t height, cudaMemcpyKind kind);
 typedef cudaError_t(*FTcudaMemcpy2DToArrayAsync)(cudaArray_t dst, size_t wOffset, size_t hOffset, const void *src, size_t spitch, size_t width, size_t height, cudaMemcpyKind kind, cudaStream_t stream);
 typedef cudaError_t(*FTcudaMemcpyArrayToArray)(cudaArray_t dst, size_t wOffsetDst, size_t hOffsetDst, cudaArray_t src, size_t wOffsetSrc, size_t hOffsetSrc, size_t count, cudaMemcpyKind kind);
+typedef cudaError_t(*FTcudaMemcpyToArray)(cudaArray_t dst, size_t wOffset, size_t hOffset, const void *src, size_t count, enum cudaMemcpyKind kind);
 
 typedef cudaError_t(*FTcudaGetDeviceCount)(int* count);
 
@@ -106,6 +107,7 @@ extern FTcudaGraphicsResourceSetMapFlags FUNC_CUDA(cudaGraphicsResourceSetMapFla
 extern FTcudaMemcpy2DToArray FUNC_CUDA(cudaMemcpy2DToArray);
 extern FTcudaMemcpy2DToArrayAsync FUNC_CUDA(cudaMemcpy2DToArrayAsync);
 extern FTcudaMemcpyArrayToArray FUNC_CUDA(cudaMemcpyArrayToArray);
+extern FTcudaMemcpyToArray  FUNC_CUDA(cudaMemcpyToArray);
 
 extern FTcudaGetDeviceCount FUNC_CUDA(cudaGetDeviceCount);
 
@@ -179,6 +181,7 @@ static int initCUDA()
 		FUNC_CUDA(cudaMemcpy2DToArray) = (FTcudaMemcpy2DToArray)GetProcAddress(hCuda, "cudaMemcpy2DToArray");
 		FUNC_CUDA(cudaMemcpy2DToArrayAsync) = (FTcudaMemcpy2DToArrayAsync)GetProcAddress(hCuda, "cudaMemcpy2DToArrayAsync");
 		FUNC_CUDA(cudaMemcpyArrayToArray) = (FTcudaMemcpyArrayToArray)GetProcAddress(hCuda, "cudaMemcpyArrayToArray");
+		FUNC_CUDA(cudaMemcpyToArray) = (FTcudaMemcpyToArray)GetProcAddress(hCuda, "cudaMemcpyToArray");
 	}
 	else
 		return -1;

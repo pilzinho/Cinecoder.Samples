@@ -64,6 +64,8 @@ DecodeDaniel2::DecodeDaniel2() :
     m_FrameRate.num = 60;
     m_FrameRate.denom = 1;
 
+	m_dec_scale_factor = CC_VDEC_NO_SCALE;
+
 #if defined(__WIN32__)
 	m_pVideoDecD3D11 = nullptr;
 	m_pRender = nullptr;
@@ -82,13 +84,14 @@ DecodeDaniel2::~DecodeDaniel2()
     m_file.CloseFile(); // close reading DN2 file
 }
 
-int DecodeDaniel2::OpenFile(const char* const filename, size_t iMaxCountDecoders, bool useCuda, bool force8Bit)
+int DecodeDaniel2::OpenFile(const char* const filename, size_t iMaxCountDecoders, bool useCuda, IMAGE_FORMAT outputFormat)
 {
     m_bInitDecoder = false;
-	m_bForce8Bit = force8Bit;
     m_filename = _com_util::ConvertStringToBSTR(filename);
 
     m_bUseCuda = useCuda;
+
+	m_setOutputFormat = outputFormat;
 
     int res = m_file.OpenFile(filename); // open input DN2 file
 
@@ -156,7 +159,8 @@ int DecodeDaniel2::OpenFile(const char* const filename, size_t iMaxCountDecoders
         printf("filename      : %s\n", filename);
         printf("stream type   : %s\n", m_strStreamType);
         printf("width x height: %zu x %zu\n", m_width, m_height);
-        if (strcmp(m_strStreamType, "Daniel") == 0)
+		if (m_dec_scale_factor != CC_VDEC_NO_SCALE) printf("scale factor  : 1/%d\n", (2 << (m_dec_scale_factor - 1)));
+		if (strcmp(m_strStreamType, "Daniel") == 0) 
         {
             switch (m_ChromaFormat)
             {
@@ -329,7 +333,8 @@ int DecodeDaniel2::CreateDecoder(size_t iMaxCountDecoders, bool useCuda)
 
 #if defined(__WIN32__)
     case CC_ES_TYPE_VIDEO_HEVC:
-        clsidDecoder = useCuda ? CLSID_CC_HEVCVideoDecoder_NV : CLSID_CC_HEVCVideoDecoder;
+			//clsidDecoder = useCuda ? CLSID_CC_HEVCVideoDecoder_NV : CLSID_CC_HEVCVideoDecoder;
+			clsidDecoder = CLSID_CC_HEVCVideoDecoder_NV;
         m_strStreamType = "HEVC";
         bIntraFormat = false;
         break;
@@ -361,7 +366,7 @@ int DecodeDaniel2::CreateDecoder(size_t iMaxCountDecoders, bool useCuda)
     {
         com_ptr<ICC_DanielVideoDecoder_CUDA> pCuda;
 
-        if (FAILED(hr = m_pVideoDec->QueryInterface(IID_ICC_DanielVideoDecoder_CUDA, (void**)&pCuda)))
+		if(FAILED(hr = m_pVideoDec->QueryInterface(IID_ICC_DanielVideoDecoder_CUDA, (void**)&pCuda)) || !pCuda)
             return printf("DecodeDaniel2: Failed to get ICC_DanielVideoDecoder_CUDA interface!\n"), hr;
 
         if (FAILED(hr = pCuda->put_TargetColorFormat(static_cast<CC_COLOR_FMT>(CCF_BGRA)))) // need call put_TargetColorFormat for using GetFrame when using GPU-pipeline
@@ -369,15 +374,15 @@ int DecodeDaniel2::CreateDecoder(size_t iMaxCountDecoders, bool useCuda)
     }
 #endif
 
-    com_ptr<ICC_ProcessDataPolicyProp> pPolicy;
-    if (SUCCEEDED(hr = m_pVideoDec->QueryInterface(IID_ICC_ProcessDataPolicyProp, (void**)&pPolicy)))
+	com_ptr<ICC_ProcessDataPolicyProp> pPolicy = nullptr;
+	if (SUCCEEDED(hr = m_pVideoDec->QueryInterface(IID_ICC_ProcessDataPolicyProp, (void**)&pPolicy)) && pPolicy)
     {
         if (FAILED(hr = pPolicy->put_ProcessDataPolicy(CC_PDP_PARSED_DATA)))
             return printf("DecodeDaniel2: put_ProcessDataPolicy failed!\n"), hr;
     }
 
-    com_ptr<ICC_ConcurrencyLevelProp> pConcur;
-    if (SUCCEEDED(hr = m_pVideoDec->QueryInterface(IID_ICC_ConcurrencyLevelProp, (void**)&pConcur)))
+	com_ptr<ICC_ConcurrencyLevelProp> pConcur = nullptr;
+	if (SUCCEEDED(hr = m_pVideoDec->QueryInterface(IID_ICC_ConcurrencyLevelProp, (void**)&pConcur)) && pConcur)
     {
         // set count of decoders in carousel of decoders
         if (FAILED(hr = pConcur->put_ConcurrencyLevel(static_cast<CC_AMOUNT>(iMaxCountDecoders))))
@@ -401,6 +406,14 @@ int DecodeDaniel2::CreateDecoder(size_t iMaxCountDecoders, bool useCuda)
         }
 	}
 #endif
+
+	//com_ptr<ICC_VDecFixedScaleFactorProp> pVDecFixedScaleFactorProp = nullptr;
+	//hr = m_pVideoDec->QueryInterface((ICC_VDecFixedScaleFactorProp**)&pVDecFixedScaleFactorProp);
+	//if (SUCCEEDED(hr) && pVDecFixedScaleFactorProp)
+	//{
+	//	CC_VDEC_SCALE_FACTOR v = CC_VDEC_SCALE_X4;
+	//	hr = pVDecFixedScaleFactorProp->put_FixedScaleFactor(v);
+	//}
 
     // init decoder
     if (FAILED(hr = m_pVideoDec->Init()))
@@ -493,20 +506,20 @@ HRESULT STDMETHODCALLTYPE DecodeDaniel2::DataReady(IUnknown *pDataProducer)
     CC_TIME						PTS = 0;
     CC_TIME						DTS = 0;
 
-    com_ptr<ICC_VideoStreamInfo> pVideoStreamInfo;
-    com_ptr<ICC_VideoFrameInfo> pVideoFrameInfo;
+	com_ptr<ICC_VideoStreamInfo> pVideoStreamInfo = nullptr;
+	com_ptr<ICC_VideoFrameInfo> pVideoFrameInfo = nullptr;
 
-    if (FAILED(hr = pVideoProducer->GetVideoStreamInfo((ICC_VideoStreamInfo**)&pVideoStreamInfo)))
+	if (FAILED(hr = pVideoProducer->GetVideoStreamInfo((ICC_VideoStreamInfo**)&pVideoStreamInfo)) || !pVideoStreamInfo)
         return printf("GetVideoStreamInfo() fails\n"), hr;
 
-    if (FAILED(hr = pVideoProducer->GetVideoFrameInfo((ICC_VideoFrameInfo**)&pVideoFrameInfo)))
+	if (FAILED(hr = pVideoProducer->GetVideoFrameInfo((ICC_VideoFrameInfo**)&pVideoFrameInfo)) || !pVideoFrameInfo)
         return printf("GetVideoFrameInfo() fails\n"), hr;
 
     hr = pVideoStreamInfo->get_FrameRate(&FrameRate); __check_hr
         hr = pVideoStreamInfo->get_FrameSize(&FrameSize); __check_hr
-
-        com_ptr<ICC_VideoStreamInfoExt>	pVideoStreamInfoExt;
-    if (FAILED(hr = pVideoStreamInfo->QueryInterface(IID_ICC_VideoStreamInfoExt, (void**)&pVideoStreamInfoExt)))
+	
+	com_ptr<ICC_VideoStreamInfoExt>	pVideoStreamInfoExt = nullptr;
+	if(FAILED(hr = pVideoStreamInfo->QueryInterface(IID_ICC_VideoStreamInfoExt, (void**)&pVideoStreamInfoExt)) || !pVideoStreamInfoExt)
         return printf("Failed to get ICC_VideoStreamInfoExt interface\n"), hr;
 
     hr = pVideoStreamInfoExt->get_ChromaFormat(&ChromaFormat); __check_hr
@@ -514,7 +527,7 @@ HRESULT STDMETHODCALLTYPE DecodeDaniel2::DataReady(IUnknown *pDataProducer)
         hr = pVideoStreamInfoExt->get_BitDepthLuma(&BitDepth); __check_hr
 
         com_ptr<ICC_DanielVideoStreamInfo>	pDanielVideoStreamInfo;
-    if (SUCCEEDED(pVideoStreamInfo->QueryInterface(IID_ICC_DanielVideoStreamInfo, (void**)&pDanielVideoStreamInfo)))
+	if(SUCCEEDED(pVideoStreamInfo->QueryInterface(IID_ICC_DanielVideoStreamInfo, (void**)&pDanielVideoStreamInfo)) && pDanielVideoStreamInfo)
     {
         hr = pDanielVideoStreamInfo->get_PictureOrientation(&PictureOrientation); __check_hr
     }
@@ -547,6 +560,8 @@ HRESULT STDMETHODCALLTYPE DecodeDaniel2::DataReady(IUnknown *pDataProducer)
                     }
                     else
                     {
+					pBlock->iMatrixCoeff_YUYtoRGBA = ConvertMatrixCoeff_Default;
+
                         if (ChromaFormat == CC_CHROMA_422)
                             pBlock->iMatrixCoeff_YUYtoRGBA = (size_t)(ColorCoefs.MC); // need for CC_CHROMA_422
 
@@ -615,6 +630,13 @@ HRESULT STDMETHODCALLTYPE DecodeDaniel2::DataReady(IUnknown *pDataProducer)
             if (SUCCEEDED(m_pVideoDec->get_TimeBase(&timeBase)) && timeBase != 0)
                 m_llTimeBase = timeBase;
 
+		//com_ptr<ICC_VDecFixedScaleFactorProp> pVDecFixedScaleFactorProp = nullptr;
+		//hr = m_pVideoDec->QueryInterface((ICC_VDecFixedScaleFactorProp**)&pVDecFixedScaleFactorProp);
+		//if (SUCCEEDED(hr) && pVDecFixedScaleFactorProp)
+		//{
+		//	hr = pVDecFixedScaleFactorProp->get_FixedScaleFactor(&m_dec_scale_factor);
+		//}
+
             com_ptr<ICC_VideoAccelerationInfo> pVideoAccelerationInfo;
             if (SUCCEEDED(m_pVideoDec->QueryInterface(IID_ICC_VideoAccelerationInfo, (void**)&pVideoAccelerationInfo)))
             {
@@ -645,32 +667,55 @@ HRESULT STDMETHODCALLTYPE DecodeDaniel2::DataReady(IUnknown *pDataProducer)
                         }
                     }
 
-                    CC_VIDEO_FRAME_DESCR vid_frame_desc;
-                    if (SUCCEEDED(d3d11VideoObject->GetVideoFrameDescr(&vid_frame_desc)))
-                    {
-                        m_fmt = vid_frame_desc.cFormat;
-                        m_stride = vid_frame_desc.iStride;
-                        m_outputImageFormat = IMAGE_FORMAT_RGBA8BIT;
+				if (m_bUseCuda)
+				{
+					CC_VIDEO_FRAME_DESCR vid_frame_desc;
+					if (SUCCEEDED(d3d11VideoObject->GetVideoFrameDescr(&vid_frame_desc)))
+					{
+						m_fmt = vid_frame_desc.cFormat;
+						m_stride = vid_frame_desc.iStride;
+						m_outputImageFormat = IMAGE_FORMAT_RGBA8BIT;
+						m_outputBufferFormat = BUFFER_FORMAT_NV12;
 
-                        m_bInitDecoder = true; // set init decoder value
-                        m_eventInitDecoder.Set(); // set event about decoder was initialized
+						if (m_fmt == CCF_NV12)
+						{
+							m_outputImageFormat = IMAGE_FORMAT_RGBA8BIT;
+							m_outputBufferFormat = BUFFER_FORMAT_NV12;
+						}
+						else if (m_fmt == CCF_P016) // CCF_NV12_16BIT
+						{
+							m_outputImageFormat = IMAGE_FORMAT_RGBA16BIT;
+							m_outputBufferFormat = BUFFER_FORMAT_P016;
+						}
+						else 
+							return E_FAIL;
 
-                        return S_OK;
-                    }
-                }
-            }
+						m_bInitDecoder = true; // set init decoder value
+						m_eventInitDecoder.Set(); // set event about decoder was initialized
+
+						return S_OK;
+					}
+				}
+			}
+		}
 #endif
 
             CC_COLOR_FMT fmt = CCF_B8G8R8A8; // set output format
-            if (!m_bForce8Bit && BitDepth > 8) fmt = fmt == CCF_B8G8R8A8 ? CCF_B16G16R16A16 : CCF_R16G16B16A16;
+
+		// set user settings for output format
+		if (m_setOutputFormat == IMAGE_FORMAT_RGBA8BIT)
+			BitDepth = 8;
+		else if (m_setOutputFormat == IMAGE_FORMAT_RGBA16BIT)
+			BitDepth = 16;
+
+		if (BitDepth > 8) fmt = fmt == CCF_B8G8R8A8 ? CCF_B16G16R16A16 : CCF_R16G16B16A16;
 
 #if defined(__WIN32__)
-			//if (m_bUseCuda && ChromaFormat == CC_CHROMA_422) fmt = BitDepth == 8 ? CCF_YUY2 : CCF_Y216;
-			if (ChromaFormat == CC_CHROMA_422) fmt = BitDepth == 8 ? CCF_YUY2 : CCF_Y216;
-
-			if (m_bForce8Bit && !m_bUseCuda && fmt == CCF_Y216)
-				fmt = CCF_YUY2;
+        if (m_bUseCuda && ChromaFormat == CC_CHROMA_422) fmt = BitDepth == 8 ? CCF_YUY2 : CCF_Y216;
 #endif
+
+		//if (m_bForce8Bit && !m_bUseCuda && fmt == CCF_Y216)
+		//	fmt = CCF_YUY2;
 
             CC_BOOL bRes = CC_FALSE;
             hr = pVideoProducer->IsFormatSupported(fmt, &bRes);

@@ -2,7 +2,10 @@
 
 #include "Block.h"
 #include "ReadFileDN2.h"
-#include "ImageFormat.h"
+//#include "ImageFormat.h"
+
+enum IMAGE_FORMAT { IMAGE_FORMAT_UNKNOWN, IMAGE_FORMAT_RGBA8BIT, IMAGE_FORMAT_BGRA8BIT, IMAGE_FORMAT_RGBA16BIT, IMAGE_FORMAT_BGRA16BIT, IMAGE_FORMAT_RGB30 };
+enum BUFFER_FORMAT { BUFFER_FORMAT_UNKNOWN, BUFFER_FORMAT_RGBA32, BUFFER_FORMAT_RGBA64, BUFFER_FORMAT_YUY2, BUFFER_FORMAT_Y216, BUFFER_FORMAT_NV12, BUFFER_FORMAT_P016 };
 
 #if defined(__WIN32__)
 class GPURenderDX;
@@ -23,9 +26,13 @@ private:
 	CC_COLOR_FMT m_fmt;
 	const char* m_strStreamType;
 
+	IMAGE_FORMAT m_setOutputFormat;
+
 	CC_FRAME_RATE m_FrameRate;
 	CC_CHROMA_FORMAT m_ChromaFormat;
 	DWORD m_BitDepth;
+
+	CC_VDEC_SCALE_FACTOR m_dec_scale_factor;
 
 	bool m_bProcess;
 	bool m_bPause;
@@ -65,7 +72,7 @@ public:
 	~DecodeDaniel2();
 
 public:
-	int OpenFile(const char* const filename, size_t iMaxCountDecoders = 2, bool useCuda = false, bool force8Bit = false);
+	int OpenFile(const char* const filename, size_t iMaxCountDecoders = 2, bool useCuda = false, IMAGE_FORMAT outputFormat = IMAGE_FORMAT_UNKNOWN);
 	int StartDecode();
 	int StopDecode();
 
@@ -102,6 +109,8 @@ public:
     CC_CHROMA_FORMAT GetChromaFormat() { return m_ChromaFormat; }
     CC_COLOR_FMT GetColorFormat() { return m_fmt; }
     DWORD GetBitDepth() { return m_BitDepth; }
+
+    void SetForce8Bit(const bool force8Bit) { m_bForce8Bit = force8Bit; }
 
     void SetErrorHandler(ICC_ErrorHandler* const handler);
 

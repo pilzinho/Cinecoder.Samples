@@ -83,23 +83,27 @@ void printHelp(void)
 	printf("Usage: Daniel2.SimplePlayerGL [OPTION]...\n");
 	printf("Test the decode DANIEL2 format file (DN2) using OpenGL(GLUT)\nNow with added Cinecoder power to decode MXFs with various other codecs (because we can!)");
 	printf("\n");
-	printf("Command line example: <Daniel2.SimplePlayerGL.exe> <file_path> -decoders 2 -vsync -rotate_frame\n");
+	printf("Command line example: <Daniel2.SimplePlayerGL.exe> <file_path> -decoders 2 -d3d11 nvidia -vsync -rotate_frame -output_format RGBA32\n");
 	printf("\n");
 	printf("Options:\n");
 	printf("-help               display this help menu\n");
 	printf("-decoders <N>       max count of decoders [1..4] (default: 2)\n");
 	//printf("-vsync              enable vertical synchronisation (default - disable)\n");
-	printf("-fpsmax             enable maximum playing fps (default - disable)\n");
-	printf("-rotate_frame       enable rotate frame (default - disable)\n");
+	printf("-fpsmax             enable maximum playing fps (default: disable)\n");
+	printf("-rotate_frame       enable rotate frame (default: disable)\n");
 #ifdef USE_CUDA_SDK
-	printf("-cuda               enable CUDA decoding (default - disable, PC only)\n");
+	printf("-cuda               enable CUDA decoding (default: disable, PC only)\n");
 #endif
 #if defined(__WIN32__)
-	printf("-d3d11              enable DirectX11 pipeline (default - OpenGL)\n");
+	printf("-d3d11 [adapter]   enable DirectX11 pipeline (default: OpenGL)\n");
+	printf("    any:            Any Graphics Adapter (without cuda)\n");
+	printf("    intel:          IntelHD Graphics Adapter (without cuda)\n");
+	printf("    nvidia:         NVIDIA Adapter (set by default)\n");
 #endif
 #if !defined(__WIN32__)
 	printf("-ogl33              enable modern OpenGL 3.3 (default use OpenGL 1.1)\n");
 #endif
+	printf("-output_format      output texture format (default: RGBA32 for 8 bit and RGBA64 for more 8 bit)\n");
 	printf("\nCommands:\n");
 	printf("'ESC':              exit\n");
 	printf("'p' or 'SPACE':     on/off pause\n");
@@ -178,10 +182,33 @@ int main(int argc, char **argv)
 	}
 #endif
 
+	size_t gpuDevice = 1;
 #if defined(__WIN32__)
 	if (checkCmdLineArg(argc, (const char **)argv, "d3d11"))
 	{
 		g_useDirectX11 = true; // use DirectX11 pipeline
+
+		if (getCmdLineArgStr(argc, (const char **)argv, "d3d11", &str))
+		{
+			if (strcmp(str, "nvidia") == 0)
+			{
+				gpuDevice = 1;
+			}
+			else if (strcmp(str, "intel") == 0)
+			{
+				if (!g_useCuda)
+					gpuDevice = 2;
+				else
+					printf("ignored: option \"-d3d11 intel\" was ignored because set param \"-cuda\"\n");
+			}
+			else if (strcmp(str, "any") == 0)
+			{
+				if (!g_useCuda)
+					gpuDevice = 0;
+				else
+					printf("ignored: option \"-d3d11 any\" was ignored because set param \"-cuda\"\n");
+			}
+		}
 	}
 #endif	
 
@@ -191,6 +218,18 @@ int main(int argc, char **argv)
 		g_useModernOGL = true; // use modern OpenGL 3.3
 	}
 #endif
+
+	IMAGE_FORMAT outputFormat = IMAGE_FORMAT_UNKNOWN;
+
+	if (getCmdLineArgStr(argc, (const char **)argv, "output_format", &str))
+	{
+		if (strcmp(str, "RGBA32") == 0)
+			outputFormat = IMAGE_FORMAT_RGBA8BIT;
+		else if (strcmp(str, "RGBA64") == 0)
+			outputFormat = IMAGE_FORMAT_RGBA16BIT;
+		else 
+			printf("output_format set incorrect!\n");
+	}
 
 	int res = 0;
 	
@@ -204,7 +243,7 @@ int main(int argc, char **argv)
 
 	if (render && !render->IsInit())
 	{
-		int res = render->Init(filename, iMaxCountDecoders, g_useCuda); // init render
+		int res = render->Init(filename, iMaxCountDecoders, g_useCuda, gpuDevice, outputFormat); // init render
 
 		if (res == 0)
 			res = render->SetParameters(g_bVSync, g_bRotate, g_bMaxFPS); // set startup parameters
@@ -217,7 +256,6 @@ int main(int argc, char **argv)
 
 	render = nullptr; // destroy render
 #else
-
 	decodeD2 = std::make_shared<DecodeDaniel2>(); // Create decoder for decoding DN2 files
 
 	if (!decodeD2)
@@ -226,7 +264,7 @@ int main(int argc, char **argv)
 		return 0;
 	}
 
-	res = decodeD2->OpenFile(filename.c_str(), iMaxCountDecoders, g_useCuda); // Open input DN2 file
+	res = decodeD2->OpenFile(filename.c_str(), iMaxCountDecoders, g_useCuda, outputFormat); // Open input DN2 file
 
 	if (res != 0)
 	{
