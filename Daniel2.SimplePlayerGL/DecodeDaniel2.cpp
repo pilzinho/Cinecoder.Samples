@@ -395,7 +395,7 @@ int DecodeDaniel2::CreateDecoder(size_t iMaxCountDecoders, bool useCuda)
 
 #if defined(__WIN32__)
     // Only needed when explicitly setup as DX renderer
-	if (m_bUseCuda && m_pRender)
+	if (m_bUseCuda && (m_pRender || m_bD3D11AccEnabled))
 	{
         m_pVideoDec->QueryInterface(IID_ICC_D3D11VideoProducer, (void**)&m_pVideoDecD3D11);
         if (m_pVideoDecD3D11)
@@ -577,11 +577,19 @@ HRESULT STDMETHODCALLTYPE DecodeDaniel2::DataReady(IUnknown *pDataProducer)
 						//ID3D11Texture2D* pResourceDXD11 = (ID3D11Texture2D*)pBlock->GetD3DX11ResourcePtr();
 						if (pResourceDXD11)
 						{
-							m_pRender->MultithreadSyncBegin();
+                            if (m_pRender)
+							    m_pRender->MultithreadSyncBegin();
+                            else 
+                                m_pMultithread->Enter();
+
 							RegisterResourceD3DX11(pResourceDXD11); // Register the resources of D3DX11 in Cinecoder
 							hr = m_pVideoDecD3D11->GetFrame(pResourceDXD11, &frameDesc); // Copy frame to resources of D3DX11
 							UnregisterResourceD3DX11(pResourceDXD11); // Unregister the resources of D3DX11 in Cinecoder
-							m_pRender->MultithreadSyncEnd();
+                            if (m_pRender)
+							    m_pRender->MultithreadSyncEnd();
+                            else 
+                                m_pMultithread->Leave();
+
 							__check_hr
 						}
 					} // if (m_pVideoDecD3D11)
@@ -703,9 +711,9 @@ HRESULT STDMETHODCALLTYPE DecodeDaniel2::DataReady(IUnknown *pDataProducer)
 
 		// set user settings for output format
 		if (m_setOutputFormat == IMAGE_FORMAT_RGBA8BIT)
-			BitDepth = 8;
+            BitDepth = 8;
 		else if (m_setOutputFormat == IMAGE_FORMAT_RGBA16BIT)
-			BitDepth = 16;
+            BitDepth = 16;
 
 		if (BitDepth > 8) fmt = fmt == CCF_B8G8R8A8 ? CCF_B16G16R16A16 : CCF_R16G16B16A16;
 
@@ -787,6 +795,30 @@ HRESULT STDMETHODCALLTYPE DecodeDaniel2::DataReady(IUnknown *pDataProducer)
         return hr;
 }
 
+
+HRESULT DecodeDaniel2::CreateD3DXBuffer(ID3D11Buffer** pBuffer, size_t iSizeBuffer)
+{
+    HRESULT hr = S_OK;
+
+    D3D11_BUFFER_DESC desc = {};
+
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
+
+    desc.ByteWidth = static_cast<UINT>(iSizeBuffer);
+
+    hr = m_pd3dDevice->CreateBuffer(&desc, NULL, pBuffer); __hr(hr)
+
+        if (!SUCCEEDED(hr))
+        {
+            printf("CreateD3DXBuffer failed: size of buffer = %zu\n", iSizeBuffer);
+            return hr;
+        }
+
+    return hr;
+}
+
 long DecodeDaniel2::ThreadProc()
 {
     m_bProcess = true;
@@ -807,7 +839,13 @@ long DecodeDaniel2::ThreadProc()
 
 			if (true)
 			{
-				hr = m_pRender->CreateD3DXBuffer(&pResourceDXD11, m_stride * m_width); __check_hr
+                if (m_pRender)
+                {
+                    hr = m_pRender->CreateD3DXBuffer(&pResourceDXD11, m_stride * m_width); __check_hr
+                }
+                else {
+                    hr = CreateD3DXBuffer(&pResourceDXD11, m_stride * m_width); __check_hr
+                }
 			}
 			//else
 			//{

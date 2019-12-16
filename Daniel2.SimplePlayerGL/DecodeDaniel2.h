@@ -118,10 +118,18 @@ private:
 	GPURenderDX* m_pRender;
 	IDXGIAdapter1* m_pCapableAdapter;
 	com_ptr<ICC_D3D11VideoProducer> m_pVideoDecD3D11;
+    ID3D11Device* m_pd3dDevice;
+    ID3D10Multithread* m_pMultithread;
+    bool m_bD3D11AccEnabled = false;
 public:
 	void InitD3DX11Render(GPURenderDX *pRender) { m_pRender = pRender; }
 	void InitD3DXAdapter(IDXGIAdapter1* pCapableAdapter) { m_pCapableAdapter = pCapableAdapter; }
 	bool IsD3DX11Acc() { return m_pVideoDecD3D11 ? true : false; }
+
+    void SetD3DDevice(ID3D11Device* const device) { m_pd3dDevice = device; }
+    void SetMultithread(ID3D10Multithread* multithread) { m_pMultithread = multithread; }
+    void EnableD3D11Accel(const bool enable) { m_bD3D11AccEnabled = enable; }
+
 private:
 	void RegisterResourceD3DX11(ID3D11Resource* pResource)
 	{
@@ -137,6 +145,8 @@ private:
 		if (pResource)
 			hr = m_pVideoDecD3D11->UnregisterResource(pResource); __check_hr
 	}
+
+    HRESULT CreateD3DXBuffer(ID3D11Buffer** pBuffer, size_t iSizeBuffer);
 #endif
 
 private:
