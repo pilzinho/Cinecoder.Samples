@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "AudioSource.h"
-#include "three10_Log/PluginLogger.h"
+//#include "three10_Log/PluginLogger.h"
 
 using namespace std;
 using namespace std::chrono;
@@ -18,14 +18,14 @@ typedef long long UINT64;
 #define __al { \
 	ALuint alRes = alGetError(); \
 	if (alRes != AL_NO_ERROR) { \
-	LogError("al error = 0x%x line = %d\n", alRes, __LINE__); \
+	fprintf(stdout, "al error = 0x%x line = %d\n", alRes, __LINE__); \
 	return alRes; \
 	} }
 
 #define __al_void { \
 	ALuint alRes = alGetError(); \
 	if (alRes != AL_NO_ERROR) { \
-	LogError("al error = 0x%x line = %d\n", alRes, __LINE__); \
+	fprintf(stdout, "al error = 0x%x line = %d\n", alRes, __LINE__); \
 	} }
 #else
 #define __al
@@ -385,7 +385,7 @@ long AudioSource::ThreadProc()
         auto statsDuration = duration_cast<Seconds>(Clock::now() - lastPrintStatsTime);
         if (statsDuration >= printStatsInterval)
         {
-            LogVerbose("Decoded Audio FPS: %u, Position: %u", decodedFps, m_iCurrentFrame.load());
+            //LogVerbose("Decoded Audio FPS: %u, Position: %u", decodedFps, m_iCurrentFrame.load());
             decodedFps = 0;
             lastPrintStatsTime = Clock::now();
         }
