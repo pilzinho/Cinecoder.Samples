@@ -42,8 +42,9 @@ private:
 	bool m_bUseCuda;
 	bool m_bUseCudaHost;
 	bool m_bForce8Bit;
-
     size_t m_iSeekFrame = 0;
+    int frameReadingErrors = 0;
+    int frameProcessingErrors = 0;
 
 	ReadFileDN2 m_file;
 
@@ -121,6 +122,7 @@ private:
     ID3D11Device* m_pd3dDevice;
     ID3D10Multithread* m_pMultithread;
     bool m_bD3D11AccEnabled = false;
+
 public:
 	void InitD3DX11Render(GPURenderDX *pRender) { m_pRender = pRender; }
 	void InitD3DXAdapter(IDXGIAdapter1* pCapableAdapter) { m_pCapableAdapter = pCapableAdapter; }
@@ -155,6 +157,8 @@ private:
 
 	int InitValues();
 	int DestroyValues();
+
+    void Destroy();
 
 #if defined(__WIN32__)
 	HRESULT LoadPlugin(const char* pluginDLL);

@@ -1,6 +1,10 @@
 #include "stdafx.h"
 #include "DecodeDaniel2.h"
 
+#ifdef USE_THREE10_LOG
+#include "three10_Log/PluginLogger.h"
+#endif
+
 // Cinecoder
 #include <Cinecoder_i.c>
 #if defined(__WIN32__)
@@ -10,6 +14,7 @@
 #include "CinecoderErrorHandler.h"
 
 #define BUFFERED_FRAMES 3
+#define MAX_ERROR_COUNT 1
 
 #ifdef max
 #undef max
@@ -75,6 +80,12 @@ DecodeDaniel2::DecodeDaniel2() :
 
 DecodeDaniel2::~DecodeDaniel2()
 {
+    Destroy();
+}
+
+void DecodeDaniel2::Destroy()
+{
+    LogVerbose("Closing Daniel2 decoder ...");
     StopDecode(); // stop main thread of decode
 
     DestroyDecoder(); // destroy decoder
@@ -82,6 +93,7 @@ DecodeDaniel2::~DecodeDaniel2()
     DestroyValues(); // destroy values
 
     m_file.CloseFile(); // close reading DN2 file
+    LogVerbose("Daniel2 decoder closed");
 }
 
 int DecodeDaniel2::OpenFile(const char* const filename, size_t iMaxCountDecoders, bool useCuda, IMAGE_FORMAT outputFormat)
@@ -129,13 +141,13 @@ int DecodeDaniel2::OpenFile(const char* const filename, size_t iMaxCountDecoders
                     {
                         assert(0);
 
-                        printf("ProcessData failed hr=%d coded_frame_size=%zu coded_frame=%p\n", hr, coded_frame_size, coded_frame);
+                        LogError("ProcessData failed hr=%d coded_frame_size=%zu coded_frame=%p\n", hr, coded_frame_size, coded_frame);
 
                         hr = m_pVideoDec->Break(CC_FALSE); // break decoder 
 
                         __check_hr
 
-                            DestroyDecoder(); // destroy decoder
+                        Destroy(); // destroy decoder
 
                         return hr;
                     }
@@ -144,10 +156,10 @@ int DecodeDaniel2::OpenFile(const char* const filename, size_t iMaxCountDecoders
         if (SUCCEEDED(hr))
             hr = m_pVideoDec->Break(CC_TRUE); // break decoder and flush data from decoder (call DataReady)
 
-        if (!m_eventInitDecoder.Wait(2000) || !m_bInitDecoder) // wait 2 seconds for init decode
+        if (!m_eventInitDecoder.Wait(2000) || !m_bInitDecoder) // wait x seconds for init decode
         {
-            printf("Init decode - failed!\n");
-            return -1; // if could not decode the 0-frame until 10 second, return an error
+            LogError("Initializing decoder failed");
+            return -1; // if could not decode the 0-frame until x second, return an error
         }
 
         res = InitValues(); // init values
@@ -417,7 +429,10 @@ int DecodeDaniel2::CreateDecoder(size_t iMaxCountDecoders, bool useCuda)
 
     // init decoder
     if (FAILED(hr = m_pVideoDec->Init()))
-        return printf("DecodeDaniel2: Init failed!\n"), hr;
+    {
+        LogError("Creating Daniel2 decoder failed");
+        return hr;
+    }
 
     return 0;
 }
@@ -454,6 +469,7 @@ int DecodeDaniel2::InitValues()
         if (res != 0)
         {
             printf("InitBlocks: Init() return error - %d\n", res);
+            m_listBlocks.clear();
             return res;
         }
 
@@ -579,7 +595,7 @@ HRESULT STDMETHODCALLTYPE DecodeDaniel2::DataReady(IUnknown *pDataProducer)
 						{
                             if (m_pRender)
 							    m_pRender->MultithreadSyncBegin();
-                            else 
+                            else if (m_pMultithread)
                                 m_pMultithread->Enter();
 
 							RegisterResourceD3DX11(pResourceDXD11); // Register the resources of D3DX11 in Cinecoder
@@ -587,7 +603,7 @@ HRESULT STDMETHODCALLTYPE DecodeDaniel2::DataReady(IUnknown *pDataProducer)
 							UnregisterResourceD3DX11(pResourceDXD11); // Unregister the resources of D3DX11 in Cinecoder
                             if (m_pRender)
 							    m_pRender->MultithreadSyncEnd();
-                            else 
+                            else if (m_pMultithread)
                                 m_pMultithread->Leave();
 
 							__check_hr
@@ -611,12 +627,23 @@ HRESULT STDMETHODCALLTYPE DecodeDaniel2::DataReady(IUnknown *pDataProducer)
                 __check_hr
 #endif // #ifdef USE_CUDA_SDK
 
-                    if (m_llDuration > 0)
-                        pBlock->iFrameNumber = static_cast<size_t>(PTS) / m_llDuration; // save PTS (in our case this is the frame number)
+                    if (SUCCEEDED(hr))
+                    {
+                        if (m_llDuration > 0)
+                            pBlock->iFrameNumber = static_cast<size_t>(PTS) / m_llDuration; // save PTS (in our case this is the frame number)
+                        else
+                            pBlock->iFrameNumber = (PTS * m_FrameRate.num) / (m_llTimeBase * m_FrameRate.denom);
+
+                        m_queueFrames.Queue(pBlock); // add pointer to object of C_Block with final picture to queue
+                    }
                     else
-                        pBlock->iFrameNumber = (PTS * m_FrameRate.num) / (m_llTimeBase * m_FrameRate.denom);
-                
-                m_queueFrames.Queue(pBlock); // add pointer to object of C_Block with final picture to queue
+                    {
+                        if (++frameProcessingErrors == MAX_ERROR_COUNT)
+                        {
+                            LogError("Reached max frame processing errors");
+                            Destroy();
+                        }
+                    }
 		} // if (pBlock)
 	} // if (m_bProcess)
         else if (!m_bInitDecoder) // init values after first decoding frame
@@ -715,14 +742,14 @@ HRESULT STDMETHODCALLTYPE DecodeDaniel2::DataReady(IUnknown *pDataProducer)
 		else if (m_setOutputFormat == IMAGE_FORMAT_RGBA16BIT)
             BitDepth = 16;
 
-		if (BitDepth > 8) fmt = fmt == CCF_B8G8R8A8 ? CCF_B16G16R16A16 : CCF_R16G16B16A16;
+		if (BitDepth > 8 && !m_bForce8Bit) fmt = fmt == CCF_B8G8R8A8 ? CCF_B16G16R16A16 : CCF_R16G16B16A16;
 
 #if defined(__WIN32__)
-        if (m_bUseCuda && ChromaFormat == CC_CHROMA_422) fmt = BitDepth == 8 ? CCF_YUY2 : CCF_Y216;
+        if (ChromaFormat == CC_CHROMA_422) 
+            fmt = BitDepth == 8 ? CCF_YUY2 : CCF_Y216;
+        if (!m_bUseCuda && m_bForce8Bit && fmt == CCF_Y216)
+            fmt = CCF_YUY2;
 #endif
-
-		//if (m_bForce8Bit && !m_bUseCuda && fmt == CCF_Y216)
-		//	fmt = CCF_YUY2;
 
             CC_BOOL bRes = CC_FALSE;
             hr = pVideoProducer->IsFormatSupported(fmt, &bRes);
@@ -912,13 +939,18 @@ long DecodeDaniel2::ThreadProc()
 
             if (FAILED(hr)) // add coded frame to decoder
             {
-                assert(0);
+                //assert(0);
 
-                printf("ProcessData failed hr=%d coded_frame_size=%zu coded_frame=%p frame_number = %zd\n", hr, coded_frame_size, coded_frame, frame_number);
+                LogError("ProcessData failed hr=%d coded_frame_size=%zu coded_frame=%p frame_number = %zd\n", hr, coded_frame_size, coded_frame, frame_number);
 
                 hr = m_pVideoDec->Break(CC_FALSE); // break decoder with param CC_FALSE (without flush data to DataReady)
 
                 __check_hr
+                    if (++frameReadingErrors == MAX_ERROR_COUNT)
+                    {
+                        LogError("Reached max frame reading errors");
+                        Destroy();
+                    }
             }
         }
         else
