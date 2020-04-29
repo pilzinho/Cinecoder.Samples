@@ -17,6 +17,7 @@ BaseGPURender::BaseGPURender() :
 	// Init image size
 	image_width = 512;
 	image_height = 512;
+	image_size = image_width * image_height * 4;
 
 	fpsCount = 0;
 	ValueFPS = 60.0;
@@ -67,7 +68,7 @@ int BaseGPURender::SetParameters(bool bVSync, bool bRotate, bool bMaxFPS)
 	return 0;
 }
 
-int BaseGPURender::Init(std::string filename, size_t iMaxCountDecoders, bool useCuda, size_t gpuDevice, IMAGE_FORMAT outputFormat)
+int BaseGPURender::Init(std::string filename, size_t iMaxCountDecoders, bool useCuda, size_t gpuDevice, size_t iScale, IMAGE_FORMAT outputFormat)
 {
 	m_bUseGPU = useCuda;
 
@@ -116,7 +117,7 @@ int BaseGPURender::Init(std::string filename, size_t iMaxCountDecoders, bool use
 		//m_decodeD2->InitD3DXAdapter(m_pCapableAdapter);
 	}
 
-	int res = m_decodeD2->OpenFile(filename.c_str(), iMaxCountDecoders, useCuda, outputFormat);
+	int res = m_decodeD2->OpenFile(filename.c_str(), iMaxCountDecoders, useCuda, iScale, outputFormat);
 
 	if (res != 0)
 	{

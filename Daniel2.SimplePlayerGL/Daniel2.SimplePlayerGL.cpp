@@ -8,12 +8,15 @@ bool g_bVSync = false;
 bool g_bRotate = true;
 bool g_bLastRotate = g_bRotate;
 bool g_useCuda = false;
+bool g_useOpenCL = false;
 bool g_useDirectX11 = false;
 bool g_useModernOGL = false;
 
 bool g_bMaxFPS = false;
 bool g_bVSyncHand = true;
 bool g_bShowTexture = true;
+
+bool g_bFramebuffer = false;
 
 #if defined(__USE_GLUT_RENDER__)
 #include "SimplePlayerGL.h"
@@ -102,8 +105,13 @@ void printHelp(void)
 #endif
 #if !defined(__WIN32__)
 	printf("-ogl33              enable modern OpenGL 3.3 (default use OpenGL 1.1)\n");
+	printf("-nogl               start without OpenGL (default use OpenGL)\n");
+#endif
+#if defined(__LINUX__)
+	printf("-framebuffer        start without OpenGL and use framebuffer mode (work in Linux text console)\n");
 #endif
 	printf("-output_format      output texture format (default: RGBA32 for 8 bit and RGBA64 for more 8 bit)\n");
+	printf("-scale <N>          scale output buffer 1(x2) 2(x4) 3(x8) (only without CUDA, default: 0)\n");
 	printf("\nCommands:\n");
 	printf("'ESC':              exit\n");
 	printf("'p' or 'SPACE':     on/off pause\n");
@@ -141,6 +149,7 @@ int main(int argc, char **argv)
 	std::string filename;
 
 	size_t iMaxCountDecoders = 2;
+	size_t iScale = 0;
 
 	char *str = nullptr;
 
@@ -149,6 +158,11 @@ int main(int argc, char **argv)
 	if (getCmdLineArgStr(argc, (const char **)argv, "decoders", &str))
 	{
 		iMaxCountDecoders = atoi(str); // max count of decoders [1..4] (default: 2)
+	}
+
+	if (getCmdLineArgStr(argc, (const char **)argv, "scale", &str))
+	{
+		iScale = atoi(str);
 	}
 
 	if (checkCmdLineArg(argc, (const char **)argv, "vsync"))
@@ -217,6 +231,17 @@ int main(int argc, char **argv)
 	{
 		g_useModernOGL = true; // use modern OpenGL 3.3
 	}
+	if (checkCmdLineArg(argc, (const char **)argv, "nogl"))
+	{
+		g_bGlutWindow = false;
+	}
+#endif
+#if defined(__LINUX__)
+	if (checkCmdLineArg(argc, (const char **)argv, "framebuffer"))
+	{
+		g_bFramebuffer = true;
+		g_bGlutWindow = false;
+	}
 #endif
 
 	IMAGE_FORMAT outputFormat = IMAGE_FORMAT_UNKNOWN;
@@ -231,6 +256,14 @@ int main(int argc, char **argv)
 			printf("output_format set incorrect!\n");
 	}
 
+#if defined(__LINUX__)
+	if (g_bFramebuffer)
+	{
+		outputFormat = IMAGE_FORMAT_RGBA8BIT;
+		printf("<for this mode (framebuffer): parameter output_format was set in RGBA32!>\n");
+	}
+#endif
+
 	int res = 0;
 	
 #if defined(__WIN32__) && !defined(__USE_GLUT_RENDER__)
@@ -243,7 +276,7 @@ int main(int argc, char **argv)
 
 	if (render && !render->IsInit())
 	{
-		int res = render->Init(filename, iMaxCountDecoders, g_useCuda, gpuDevice, outputFormat); // init render
+		int res = render->Init(filename, iMaxCountDecoders, g_useCuda, gpuDevice, iScale, outputFormat); // init render
 
 		if (res == 0)
 			res = render->SetParameters(g_bVSync, g_bRotate, g_bMaxFPS); // set startup parameters
@@ -264,7 +297,7 @@ int main(int argc, char **argv)
 		return 0;
 	}
 
-	res = decodeD2->OpenFile(filename.c_str(), iMaxCountDecoders, g_useCuda, outputFormat); // Open input DN2 file
+	res = decodeD2->OpenFile(filename.c_str(), iMaxCountDecoders, g_useCuda, iScale, outputFormat); // Open input DN2 file
 
 	if (res != 0)
 	{
@@ -279,14 +312,20 @@ int main(int argc, char **argv)
 
 	ValueFPS = decodeD2->GetFrameRate(); // get frame rate
 
-	InitAudioTrack(filename, decodeD2->GetFrameRateValue());
+	if (!g_bFramebuffer)
+	{
+		InitAudioTrack(filename, decodeD2->GetFrameRateValue());
+	}
 
-#if defined(__GLUT_WINDOW__)
-	gpu_initGLUT(&argc, argv); // Init GLUT
+#if defined(__USE_GLUT_RENDER__)
+	if (g_bGlutWindow)
+	{
+		gpu_initGLUT(&argc, argv); // Init GLUT
 
-	gpu_initGLBuffers(); // Init GL buffers
+		gpu_initGLBuffers(); // Init GL buffers
 
-	get_versionGLandGLUT(); // print version of OpenGL and freeGLUT
+		get_versionGLandGLUT(); // print version of OpenGL and freeGLUT
+	}
 #endif
 	// Start timer
 	timer.StartTimer();
@@ -295,43 +334,130 @@ int main(int argc, char **argv)
 
 	decodeD2->StartDecode(); // Start decoding
 
-#if defined(__GLUT_WINDOW__)
-	// Start mainloop
-	glutMainLoop(); // Wait
-#else
-	bool bRotate = g_bRotate;
-
-	//g_bMaxFPS = true;
-	//g_bShowTexture = false;
-	//g_bCopyToTexture = false;
-	//g_bDecoder = false;
-
-	//decodeD2->SetDecode(g_bDecoder);
-	//decodeD2->SetReadFile(false);
-
-	while (true)
+#if defined(__USE_GLUT_RENDER__)
+	if (g_bGlutWindow)
 	{
-		if (!g_bPause)
-		{
-			// Copy data from queue to texture
-			res = gpu_generateImage(bRotate);
-
-			if (res < 0)
-				printf("Load texture from decoder failed!\n");
-		}
-		else
-		{
-			std::this_thread::sleep_for(std::chrono::milliseconds(100)); // to unload CPU when paused
-		}
-
-		ComputeFPS(); // Calculate fps
+		// Start mainloop
+		glutMainLoop(); // Wait
 	}
+	else
 #endif
-	if (decodeD2)
-        decodeD2 = nullptr; // destroy video decoder
+	{
+		bool bRotate = g_bRotate;
 
-    if (decodeAudio)
-        decodeAudio = nullptr; // destroy audio decoder
+		//g_bMaxFPS = true;
+		g_bShowTexture = false;
+		g_bCopyToTexture = false;
+		//g_bDecoder = false;
+
+		//decodeD2->SetDecode(g_bDecoder);
+		//decodeD2->SetReadFile(false);
+
+#if defined(__LINUX__)
+		size_t page_size = 0;
+		unsigned char* pb = nullptr;
+		
+		std::thread thMouse;
+
+		if (g_bFramebuffer)
+		{
+			res = frame_buffer.Init();
+
+			if (res != 0)
+			{
+				printf("Error: cannot initialize framebuffer!\n");
+				return 0;
+			}
+			g_bCopyToTexture = true;
+
+			page_size = frame_buffer.SizeBuffer();
+			g_var_info = frame_buffer.GetVInfo();
+
+			thMouse = std::thread(CLI_OnMouseMove);
+		}
+#endif
+
+		while (true)
+		{
+			if (!g_bMaxFPS && g_bVSyncHand)
+			{
+				double timestep = 1000.0 / ValueFPS;
+
+				double ms_elapsed = timerqFPSMode.GetElapsedTime();
+
+				int dT = (int)(timestep - ms_elapsed);
+
+				if (dT > 1)
+					std::this_thread::sleep_for(std::chrono::milliseconds(dT));
+
+				timerqFPSMode.StartTimer();
+			}
+
+			if (!g_bPause)
+			{
+#if defined(__LINUX__)
+				if (g_bFramebuffer)
+				{
+					pb = frame_buffer.GetPtr();
+
+					res = copy_to_framebuffer(pb, page_size);
+
+					CLI_Draw(pb);
+
+					frame_buffer.SwapBuffers();
+				}
+				else
+#endif
+				{
+					// Copy data from queue to texture
+					res = gpu_generateImage(bRotate);
+				}
+
+				if (res < 0)
+					printf("Load texture from decoder failed!\n");
+
+				ComputeFPS(); // Calculate fps
+			}
+			else
+			{
+#if defined(__LINUX__)
+				if (g_bFramebuffer)
+				{
+                    pb = frame_buffer.GetPtr();
+
+                    res = copy_to_framebuffer(pb, page_size);
+
+                    CLI_Draw(pb);
+
+                    frame_buffer.SwapBuffers();
+				}
+#endif
+				std::this_thread::sleep_for(std::chrono::milliseconds(1)); // to unload CPU when paused
+			}
+
+			if (_kbhit())
+			{
+				char ch = _getch();
+				if (ch == 27) break;
+				else Keyboard(ch, 0, 0);
+			}
+		}
+
+		if (decodeD2)
+			decodeD2 = nullptr; // destroy video decoder
+
+		if (decodeAudio)
+			decodeAudio = nullptr; // destroy audio decoder
+
+#if defined(__LINUX__)
+		if (g_bFramebuffer)
+		{
+			thMouse.detach();
+			frame_buffer.Destroy();
+		}
+#endif
+
+	}
 #endif
 
 #ifdef USE_CUDA_SDK

@@ -18,12 +18,62 @@
 #include <GL/glew.h> // GLEW framework
 #include <GL/glx.h> // GLX framework
 #include <GL/freeglut.h> // GLUT framework
+
+#ifndef max
+#define max(a,b)            (((a) > (b)) ? (a) : (b))
 #endif
+
+#ifndef min
+#define min(a,b)            (((a) < (b)) ? (a) : (b))
+#endif
+
+#include "../common/framebuffer.h"
+CFrameBuffer frame_buffer;
+#endif
+
+#include "../common/dib_draw.h"
+#include "../common/cpu_load_meter.h"
 
 #include "DecodeDaniel2.h"
 #include "AudioSource.h"
 
-#define __GLUT_WINDOW__
+#if defined(__WIN32__)
+#include<conio.h>
+#elif defined(__LINUX__)
+#include <stdio.h>
+#include <termios.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+#define _getch getchar
+
+int _kbhit(void)
+{
+	struct termios oldt, newt;
+	int ch;
+	int oldf;
+
+	tcgetattr(STDIN_FILENO, &oldt);
+	newt = oldt;
+	newt.c_lflag &= ~(ICANON | ECHO);
+	tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+	oldf = fcntl(STDIN_FILENO, F_GETFL, 0);
+	fcntl(STDIN_FILENO, F_SETFL, oldf | O_NONBLOCK);
+
+	ch = getchar();
+
+	tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+	fcntl(STDIN_FILENO, F_SETFL, oldf);
+
+	if (ch != EOF)
+	{
+		ungetc(ch, stdin);
+		return 1;
+	}
+
+	return 0;
+}
+#endif
 
 ///////////////////////////////////////////////////////
 
@@ -68,6 +118,8 @@ PFNWGLSWAPINTERVALEXTPROC_GLOBAL g_wglSwapInterval;
 
 #define TITLE_WINDOW_APP "TestApp OGL(Decode Daniel2)"
 
+bool g_bGlutWindow = true;
+
 bool g_bCopyToTexture = true;
 bool g_bDecoder = true;
 
@@ -98,13 +150,39 @@ float sizeSquare2 = sizeSquare / 2;
 int g_mouse_state = -1;
 int g_mouse_button = -1;
 
+#define textdib_size 128*8*2
+int textdib[textdib_size*16*2];
+int text_size_x = 0, text_size_y = 0;
+char textbuf[1024];
+
+//char g_FpsText[256] = {};
+CpuLoadMeter cpuLoadMeter;
+
 C_CritSec g_mutex; // global mutex
+
+struct mousecoord
+{
+	mousecoord() { x = y = 0; }
+	mousecoord(int x_, int y_) { x = x_; y = y_; }
+	int x, y;
+};
+
+std::deque<mousecoord> g_queuecoord;
 
 ///////////////////////////////////////////////////////
 
 #ifdef USE_CUDA_SDK
 cudaGraphicsResource_t cuda_tex_result_resource = nullptr;
 unsigned int bytePerPixel;
+#endif
+
+#ifdef USE_OPENCL_SDK
+cl_context context;
+cl_device_id device;
+cl_command_queue queue;
+cl_mem imageCL;
+
+#include "CL_ListErrors.h"
 #endif
 
 GLuint tex_result;  // Where we will copy result
@@ -138,7 +216,7 @@ GLuint rbo = 0;
 GLuint vbo = 0;
 GLuint pbo = 0; // OpenGL pixel buffer object
 #ifdef USE_CUDA_SDK
-struct cudaGraphicsResource *cuda_pbo_resource; // CUDA Graphics Resource (to transfer PBO)
+struct cudaGraphicsResource *cuda_pbo_resource = nullptr; // CUDA Graphics Resource (to transfer PBO)
 #endif
 
 //std::vector<unsigned char> pBuffer;
@@ -410,8 +488,17 @@ void SetPause(bool bPause);
 void SetVerticalSync(bool bVerticalSync);
 void ComputeFPS();
 
-void SeekToFrame(int x, int y);
-void SeekToFrame(size_t iFrame);
+void SeekToFrame(int x, int y, bool bLock = true);
+void SeekToFrame(size_t iFrame, bool bLock = true);
+void SeekToFrameImpl(size_t iFrame);
+
+int gpu_copyImage(unsigned char* pImage, size_t iSize);
+
+///////////////////////////////////////////////////////
+
+#if defined(__LINUX__)
+#include "CLI.h"
+#endif
 
 ///////////////////////////////////////////////////////
 
@@ -488,6 +575,7 @@ bool gpu_initGLUT(int *argc, char **argv)
 	else
 	{
 		glutInitDisplayMode(GLUT_RGBA | GLUT_ALPHA | GLUT_DOUBLE | GLUT_DEPTH);
+		//glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_DEPTH);
 	}
 
 	glutInitWindowSize(window_width, window_height);
@@ -592,12 +680,25 @@ bool gpu_initGLUT(int *argc, char **argv)
 	return true;
 }
 
-int gpu_copyImage(unsigned char* pImage)
+int gpu_copyImage(unsigned char* pImage, size_t iSize)
 {
+#if defined(__LINUX__)
+	if (g_bFramebuffer)
+	{
+		if (g_fb.size() < iSize)
+			g_fb.resize(iSize);
+
+		size_t size_copy = min(g_fb.size(), iSize);
+		memcpy(g_fb.data(), pImage, size_copy);
+		return 0;
+	}
+#endif
 	if (pImage)
 	{
-		glTexImage2D(GL_TEXTURE_2D, 0, g_internalFormat, image_width, image_height, 0, g_format, g_type, pImage); // coping decoded frame into the GL texture
-		//PBO_to_Texture2D(pImage, image_size);
+		if (pbo)
+			PBO_to_Texture2D(pImage, image_size); // coping decoded frame into the GL texture using PBO
+		else
+			glTexImage2D(GL_TEXTURE_2D, 0, g_internalFormat, image_width, image_height, 0, g_format, g_type, pImage); // coping decoded frame into the GL texture (synchronous call!)
 	}
 
 	return 0;
@@ -681,10 +782,15 @@ void deletePBO(GLuint *pbo)
 
 void PBO_to_Texture2D(unsigned char* pData, size_t size)
 {
+	void* pboMemory = nullptr;
+
 	// map PBO and copy data to PBO
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER_ARB, pbo);
-	void *pboMemory = glMapBuffer(GL_PIXEL_UNPACK_BUFFER_ARB, GL_WRITE_ONLY);
+
+	pboMemory = glMapBuffer(GL_PIXEL_UNPACK_BUFFER_ARB, GL_WRITE_ONLY);
+	if (!pboMemory) return;
 	memcpy(pboMemory, pData, size);
+
 	glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER_ARB);
 	glBindBuffer(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
 	
@@ -698,6 +804,79 @@ void PBO_to_Texture2D(unsigned char* pData, size_t size)
 	
 	OGL_CHECK_ERROR_GL();
 }
+
+#ifdef USE_OPENCL_SDK
+int initOpenCLContext()
+{
+	cl_int error = CL_SUCCESS;
+	size_t deviceSize = 0;
+
+	cl_uint numPlatforms = 0;
+	cl_platform_id firstPlatformId;
+
+	error = clGetPlatformIDs(1, &firstPlatformId, &numPlatforms); __rcl
+
+	if (numPlatforms == 0)
+		return -1;
+
+	cl_platform_id platform = firstPlatformId;
+
+	// Load extension function call
+	clGetGLContextInfoKHR_fn clGetGLContextInfoKHR = NULL;
+
+	//clGetGLContextInfoKHR_fn clGetGLContextInfoKHR = (clGetGLContextInfoKHR_fn)clGetExtensionFunctionAddress("clGetGLContextInfoKHR");
+
+	clGetGLContextInfoKHR = (clGetGLContextInfoKHR_fn)clGetExtensionFunctionAddressForPlatform(platform, "clGetGLContextInfoKHR");
+
+	if (!clGetGLContextInfoKHR)
+		return -1;
+
+	//Creating the context
+#if defined(__APPLE__) || defined(__MACOSX)
+	// Apple (untested)
+	CGLContextObj kCGLContext = CGLGetCurrentContext();
+	CGLShareGroupObj kCGLShareGroup = CGLGetShareGroup(kCGLContext);
+	cl_context_properties contextProperties[] = {
+		CL_CONTEXT_PROPERTY_USE_CGL_SHAREGROUP_APPLE, (cl_context_properties)kCGLShareGroup,
+		0 };
+#else
+#ifdef _WIN32
+	// Windows
+	cl_context_properties contextProperties[] = {
+		CL_CONTEXT_PLATFORM, reinterpret_cast<cl_context_properties>(platform),
+		CL_GL_CONTEXT_KHR, reinterpret_cast<cl_context_properties>(wglGetCurrentContext()),
+		CL_WGL_HDC_KHR, reinterpret_cast<cl_context_properties>(wglGetCurrentDC()),
+		0 };
+#else
+	// Linux
+	cl_context_properties contextProperties[] = {
+		CL_GL_CONTEXT_KHR, (cl_context_properties)glXGetCurrentContext(),
+		CL_GLX_DISPLAY_KHR, (cl_context_properties)glXGetCurrentDisplay(),
+		CL_CONTEXT_PLATFORM, (cl_context_properties)platform,
+		0 };
+#endif
+#endif
+
+	// Ask for the CL device associated with the GL context
+	error = clGetGLContextInfoKHR(contextProperties, CL_CURRENT_DEVICE_FOR_GL_CONTEXT_KHR, sizeof(cl_device_id), &device, &deviceSize); __rcl
+
+	// Create the context and the queue
+	context = clCreateContext(contextProperties, 1, &device, NULL, NULL, &error); __rcl
+
+	//queue = clCreateCommandQueue(context, device, 0, &error);
+
+	//cl_queue_properties props[] = { CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0 };
+	//queue = clCreateCommandQueueWithProperties(context, device, props, &error);
+	queue = clCreateCommandQueueWithProperties(context, device, NULL, &error); __rcl
+
+	imageCL = clCreateFromGLTexture(context, CL_MEM_WRITE_ONLY, GL_TEXTURE_2D, 0, tex_result, &error); __rcl
+	
+	if (error != CL_SUCCESS)
+		return -1;
+
+	return 0;
+}
+#endif
 
 void gpu_initGLBuffers()
 {
@@ -746,7 +925,7 @@ void gpu_initGLBuffers()
 	glTexImage2D(GL_TEXTURE_2D, 0, g_internalFormat, image_width, image_height, 0, g_format, g_type, NULL);
 
 //#if defined(__WIN32__)
-	if (g_useCuda)
+	if (g_useCuda || g_useOpenCL)
 	{
 		if (decodeD2->GetImageFormat() == IMAGE_FORMAT_BGRA8BIT || decodeD2->GetImageFormat() == IMAGE_FORMAT_BGRA16BIT)
 		{
@@ -774,7 +953,7 @@ void gpu_initGLBuffers()
 		image_size *= 2;
 
 	// Create PBO
-	//createPBO(&pbo, image_size);
+	createPBO(&pbo, image_size);
 
 	OGL_CHECK_ERROR_GL();
 
@@ -838,6 +1017,18 @@ void gpu_initGLBuffers()
 	}
 #endif
 
+	
+#ifdef USE_OPENCL_SDK
+
+	context = NULL;
+	device = NULL;
+	queue = NULL;
+	imageCL = NULL;
+
+	if (g_useOpenCL && initOpenCLContext() != 0)
+		g_useOpenCL = false;
+#endif
+
 	OGL_CHECK_ERROR_GL();
 
 	bytePerPixel = (decodeD2->GetImageFormat() == IMAGE_FORMAT_RGBA8BIT || decodeD2->GetImageFormat() == IMAGE_FORMAT_BGRA8BIT) ? 4 : 8; // RGBA8 or RGBA16
@@ -880,7 +1071,7 @@ int gpu_generateCUDAImage(C_Block* pBlock)
 	cudaGraphicsMapResources(1, &cuda_tex_result_resource, 0); __vrcu
 	cudaGraphicsSubResourceGetMappedArray(&texture_ptr, cuda_tex_result_resource, 0, 0); __vrcu
 
-#if defined(__WIN32__)
+#if defined(__CUDAConvertLib__)
 	ConvertMatrixCoeff iMatrixCoeff_YUYtoRGBA = (ConvertMatrixCoeff)(pBlock->iMatrixCoeff_YUYtoRGBA);
 
 	IMAGE_FORMAT output_format = decodeD2->GetImageFormat();
@@ -970,6 +1161,48 @@ int gpu_generateCUDAImage(C_Block* pBlock)
 }
 #endif
 
+#ifdef USE_OPENCL_SDK
+int gpu_generateOpenCLImage(C_Block* pBlock)
+{
+	unsigned char* pFrameData = pBlock->DataPtr();
+
+	if (g_useCuda)
+		pBlock->CopyToCPU();
+
+	IMAGE_FORMAT output_format = decodeD2->GetImageFormat();
+	BUFFER_FORMAT buffer_format = decodeD2->GetBufferFormat();
+
+	if (imageCL && pFrameData && g_bCopyToTexture)
+	{
+		cl_int error = CL_SUCCESS;
+		bool is_blockCopy = true;
+
+		// Enqueue Write Image
+		size_t origin[] = { 0, 0, 0 };
+		size_t region[] = { image_width, image_height, 1 };
+
+		error = clEnqueueAcquireGLObjects(queue, 1, &imageCL, 0, NULL, NULL);
+		
+		if (buffer_format == BUFFER_FORMAT_RGBA32 || buffer_format == BUFFER_FORMAT_RGBA64)
+		{
+			error = clEnqueueWriteImage(queue, imageCL, is_blockCopy, origin, region, 0, 0, pFrameData, 0, 0, 0);
+			//error = clFlush(queue); // if is_blockCopy == false
+			//printf("OCL Image (RGBA)\n");
+		}
+		else if (buffer_format == BUFFER_FORMAT_YUY2 || buffer_format == BUFFER_FORMAT_Y216)
+		{
+			region[1] = image_height / 2;
+			error = clEnqueueWriteImage(queue, imageCL, is_blockCopy, origin, region, 0, 0, pFrameData, 0, 0, 0);
+			//printf("OCL Image (YUY2)\n");
+		}
+
+		error = clEnqueueReleaseGLObjects(queue, 1, &imageCL, 0, NULL, NULL);
+	}
+
+	return 0;
+}
+#endif
+
 int gpu_generateImage(bool & bRotateFrame)
 {
 	if (!decodeD2->isProcess() || decodeD2->isPause()) // check for pause or process
@@ -990,10 +1223,20 @@ int gpu_generateImage(bool & bRotateFrame)
 	}
 	else
 #endif
+#ifdef USE_OPENCL_SDK
+		if (g_useOpenCL)
+		{
+			if (g_bCopyToTexture)
+			{
+				gpu_generateOpenCLImage(pBlock);
+			}
+		}
+		else
+#endif
 	{
 		if (g_bCopyToTexture)
 		{
-			gpu_copyImage(pBlock->DataPtr());
+			gpu_copyImage(pBlock->DataPtr(), pBlock->Size());
 		}
 	}
 
@@ -1008,9 +1251,113 @@ int gpu_generateImage(bool & bRotateFrame)
 	return 0;
 }
 
+#if defined(__LINUX__)
+int copy_to_framebuffer(unsigned char* pOutput, size_t iSize)
+{
+    C_AutoLock lock(&g_mutex);
+
+	if (g_bPause && g_fb.size() > 0 && !g_bCopyToFB)
+	{
+		size_t size_copy = min(g_fb.size(), iSize);
+		memcpy(pOutput, g_fb.data(), size_copy);
+		return 0;
+	}
+
+	if (!decodeD2->isProcess() || decodeD2->isPause()) // check for pause or process
+		return 1;
+
+	C_Block *pBlock = decodeD2->MapFrame(); // Get poiter to picture after decoding
+
+	if (!pBlock)
+		return -1;
+
+	size_t size_copy = min(pBlock->Size(), iSize);
+
+#ifdef USE_CUDA_SDK
+	if (g_useCuda)
+	{
+		static C_Block devRGBA;
+		static long res = 1;
+		if (res == 1) res = devRGBA.Init(pBlock->Width(), pBlock->Height(), pBlock->Width() * 4, 0, true);
+
+		if (g_bCopyToTexture && res == 0)
+		{
+			IMAGE_FORMAT output_format = decodeD2->GetImageFormat();
+			BUFFER_FORMAT buffer_format = decodeD2->GetBufferFormat();
+
+#if defined(__CUDAConvertLib__)
+			ConvertMatrixCoeff iMatrixCoeff_YUYtoRGBA = (ConvertMatrixCoeff)(pBlock->iMatrixCoeff_YUYtoRGBA);
+
+			#define PARAMS_BtB (void*)pBlock->DataGPUPtr(), (void*)devRGBA.DataGPUPtr(), (int)pBlock->Width(), (int)pBlock->Height(), (int)pBlock->Pitch(), (int)devRGBA.Pitch(), NULL
+
+			if (buffer_format == BUFFER_FORMAT_RGBA32)
+			{
+				cudaMemcpy2D(pOutput, pBlock->Width() * 4, (void*)pBlock->DataGPUPtr(), pBlock->Pitch(), (pBlock->Width() * 4), pBlock->Height(), cudaMemcpyDeviceToHost); __vrcu
+			}
+			else
+			{
+				if (buffer_format == BUFFER_FORMAT_RGBA64)
+				{
+					h_convert_RGBA64_to_RGBA32_BtB(PARAMS_BtB); __vrcu
+				}
+				else if (buffer_format == BUFFER_FORMAT_YUY2)
+				{
+					h_convert_YUY2_to_BGRA32_BtB(PARAMS_BtB, iMatrixCoeff_YUYtoRGBA); __vrcu
+				}
+				else if (buffer_format == BUFFER_FORMAT_Y216)
+				{
+					h_convert_Y216_to_BGRA32_BtB(PARAMS_BtB, iMatrixCoeff_YUYtoRGBA); __vrcu
+				}
+
+				size_copy = min(devRGBA.Size(), iSize);
+
+				cudaMemcpy(pOutput, devRGBA.DataGPUPtr(), size_copy, cudaMemcpyDeviceToHost); __vrcu
+			}
+#else
+			cudaMemcpy(pOutput, pBlock->DataGPUPtr(), size_copy, cudaMemcpyDeviceToHost); __vrcu
+#endif
+		}
+		//dib_draw::PrintStringToDIB_font8x16<DWORD>((DWORD*)pOutput, 5, 5, (int)pBlock->Width(), g_FpsText, 0xFFE0E0E0, 0XFF102030, 0, 2);
+	}
+	else
+#endif
+	{
+		if (g_bCopyToTexture)
+		{
+			//dib_draw::PrintStringToDIB_font8x16<DWORD>((DWORD*)pBlock->DataPtr(), 5, 5, (int)pBlock->Width(), g_FpsText, 0xFFE0E0E0, 0XFF102030, 0, 2);
+			memcpy(pOutput, pBlock->DataPtr(), size_copy);
+		}
+		else
+		{
+			//dib_draw::PrintStringToDIB_font8x16<DWORD>((DWORD*)pOutput, 5, 5, (int)pBlock->Width(), g_FpsText, 0xFFE0E0E0, 0XFF102030, 0, 2);
+		}
+	}
+
+	iCurPlayFrameNumber = pBlock->iFrameNumber; // Save currect frame number
+
+	decodeD2->UnmapFrame(pBlock); // Add free pointer to queue
+
+	if ((g_bPause && g_fb.size() == 0) || g_bCopyToFB)
+	{
+        gpu_copyImage(pOutput, size_copy);
+        g_bCopyToFB = false;
+	}
+
+	return 0;
+}
+#endif
+
 void RenderWindow()
 {
 	C_AutoLock lock(&g_mutex);
+
+	if (g_queuecoord.size() != 0)
+	{
+		if (g_queuecoord.size() >= 3) g_queuecoord.erase(g_queuecoord.begin(), g_queuecoord.end() - 1);
+
+		mousecoord coord = g_queuecoord.back();	g_queuecoord.pop_back();
+		SeekToFrame(coord.x, coord.y, false);
+	}
 
 	if (!g_bVSync && !g_bMaxFPS && g_bVSyncHand)
 	{
@@ -1143,6 +1490,7 @@ void RenderWindow()
 		GLint h = glutGet(GLUT_WINDOW_HEIGHT); // Height in pixels of the current window
 
 		sizeSquare2 = (float)w / 100;
+        sizeSquare = sizeSquare2 * 2;
 		edgeLineY = sizeSquare2 * 4;
 		edgeLineX = sizeSquare2 * 2;
 
@@ -1328,34 +1676,57 @@ void ComputeFPS()
 		size_t data_rate = decodeD2->GetDataRate(true);
 		double fDataRate = bInit ? 0.0, bInit = false : (data_rate * 1000) / ms_elapsed / (1024 * 1024);
 
-#if defined(__GLUT_WINDOW__)
-		char cString[256];
-		std::string cTitle;
+		float fCpuload = cpuLoadMeter.GetLoad();
 
-		GLint w = glutGet(GLUT_WINDOW_WIDTH); // Width in pixels of the current window
-		GLint h = glutGet(GLUT_WINDOW_HEIGHT); // Height in pixels of the current window
-
-		if (g_bPause)
-			sprintf_s(cString, "%s (%d x %d): (Pause)", TITLE_WINDOW_APP, w, h);
-		else
-			sprintf_s(cString, "%s (%d x %d): %.0f fps data_rate = %.2f MB/s", TITLE_WINDOW_APP, w, h, fps, fDataRate);
-
-		cTitle = cString;
-		switch (g_internalFormat)
+		if (g_bGlutWindow)
 		{
-		case GL_RGBA: cTitle += " fmt=RGBA32"; break;
-		case GL_RGB10: cTitle += " fmt=RGB30"; break;
-		case GL_RGBA16: cTitle += " fmt=RGBA64"; break;
-		default: break;
+			char cString[256];
+			std::string cTitle;
+
+			GLint w = glutGet(GLUT_WINDOW_WIDTH); // Width in pixels of the current window
+			GLint h = glutGet(GLUT_WINDOW_HEIGHT); // Height in pixels of the current window
+
+			if (g_bPause)
+				sprintf_s(cString, "%s (%d x %d): (Pause)", TITLE_WINDOW_APP, w, h);
+			else
+				sprintf_s(cString, "%s (%d x %d): %.0f fps data_rate = %.2f MB/s", TITLE_WINDOW_APP, w, h, fps, fDataRate);
+
+			cTitle = cString;
+			switch (g_internalFormat)
+			{
+			case GL_RGBA: cTitle += " fmt=RGBA32"; break;
+			case GL_RGB10: cTitle += " fmt=RGB30"; break;
+			case GL_RGBA16: cTitle += " fmt=RGBA64"; break;
+			default: break;
+			}
+
+			cTitle += " cur_frm=";
+			cTitle += std::to_string((long long)iCurPlayFrameNumber); // print current frame number
+
+			glutSetWindowTitle(cTitle.c_str());
+
+			if (g_bFullScreen)
+				printf("%s: %.0f fps data_rate = %.2f MB/s\n", TITLE_WINDOW_APP, fps, fDataRate);
+		}
+		else
+		{
+#if defined(__LINUX__)
+			if (g_bFramebuffer)
+			{
+				//sprintf_s(g_FpsText, "Framebuffer mode: %.0f fps data_rate = %.2f MB/s CPU Load: %.2f%%", fps, fDataRate, fCpuload);
+
+				sprintf_s(textbuf, "%.2f fps %.2f MB/s CPU: %.2f%%", fps, fDataRate, fCpuload);
+				dib_draw::PrintStringToDIB_font8x16(textdib, 0, 0, textdib_size, textbuf, -1, 0, 0, 2);
+			    text_size_x = strlen(textbuf)*8*2;
+                text_size_y = 16*2;
+
+                //sprintf_s(g_FpsText, "%s", textbuf);
+            }
+			else
+#endif
+				printf("%s: %.0f fps data_rate = %.2f MB/s\n", TITLE_WINDOW_APP, fps, fDataRate);
 		}
 
-		cTitle += " cur_frm=";
-		cTitle += std::to_string((long long)iCurPlayFrameNumber); // print current frame number
-
-		glutSetWindowTitle(cTitle.c_str());
-#else
-		printf("%s: %.0f fps data_rate = %.2f MB/s\n", TITLE_WINDOW_APP, fps, fDataRate);
-#endif
 		fpsCount = 0;
 
 		timer.StartTimer();
@@ -1368,11 +1739,25 @@ void Keyboard(unsigned char key, int /*x*/, int /*y*/)
 	{
 	case 27:
 	{
+		if (g_bGlutWindow)
+		{
 #if defined(__APPLE__)
-		exit(0); // On MacOS we have error <Use of undeclared identifier 'glutLeaveMainLoop'> so we call exit(0)
+			exit(0); // On MacOS we have error <Use of undeclared identifier 'glutLeaveMainLoop'> so we call exit(0)
 #else
-		glutLeaveMainLoop();
+			glutLeaveMainLoop();
 #endif
+		}
+#if defined(__LINUX__)
+		else if (g_bFramebuffer)
+		{
+			g_CLI_bProcess = false;
+			exit(0);
+		}
+#endif
+		else
+		{
+			exit(0);
+		}
 		break;
 	}
 
@@ -1397,6 +1782,14 @@ void Keyboard(unsigned char key, int /*x*/, int /*y*/)
 			SeekToFrame(iCurPlayFrameNumber);
 
 		SetPause(!g_bPause);
+
+#if defined(__LINUX__)
+        if (g_bFramebuffer)
+        {
+            if (g_bPause)
+                g_bCopyToFB = true;
+		}
+#endif
 		break;
 	}
 
@@ -1504,12 +1897,15 @@ void Keyboard(unsigned char key, int /*x*/, int /*y*/)
 	{
 		g_bFullScreen = !g_bFullScreen;
 
-		if (g_bFullScreen)
-			glutFullScreen(); // if uses freeglut 3.0 and 4K image -> GL error invalid framebuffer operation
-		else
+		if (g_bGlutWindow)
 		{
-			glutPositionWindow(100, 100); // Start position window
-			glutReshapeWindow(window_width, window_height); // requests a change to the size of the current window.
+			if (g_bFullScreen)
+				glutFullScreen(); // if uses freeglut 3.0 and 4K image -> GL error invalid framebuffer operation
+			else
+			{
+				glutPositionWindow(100, 100); // Start position window
+				glutReshapeWindow(window_width, window_height); // requests a change to the size of the current window.
+			}
 		}
 
 		if (g_bFullScreen)
@@ -1650,6 +2046,26 @@ void Cleanup()
 		cudaGraphicsUnregisterResource(cuda_pbo_resource); __vrcu
 	}
 #endif
+
+#ifdef USE_OPENCL_SDK
+	__clerror
+
+	if (imageCL)
+	{
+		error = clReleaseMemObject(imageCL); __vrcl
+	}
+
+	if (queue)
+	{
+		error = clReleaseCommandQueue(queue); __vrcl
+	}
+
+	if (context)
+	{
+		error = clReleaseContext(context); __vrcl
+	}
+#endif
+
 	OGL_CHECK_ERROR_GL();
 }
 
@@ -1699,8 +2115,9 @@ void OnMouseMove(int x, int y)
 	{
 		if (g_mouse_state == GLUT_DOWN && g_mouse_button == GLUT_LEFT_BUTTON)
 		{
-			SeekToFrame(x, y);
-			RenderWindow(); // update frame to improve performance of scrubbing
+			//SeekToFrame(x, y);
+			//RenderWindow(); // update frame to improve performance of scrubbing
+			g_queuecoord.push_back(mousecoord(x, y));
 		}
 
 		g_bShowSlider = true;
@@ -1726,6 +2143,9 @@ void SetPause(bool bPause)
 
 void SetVerticalSync(bool bVerticalSync)
 {
+	if (!g_bGlutWindow)
+		return;
+
 #if defined(__WIN32__)
 	if (!g_wglSwapInterval)
 	{
@@ -1753,9 +2173,22 @@ void SetVerticalSync(bool bVerticalSync)
 	OGL_CHECK_ERROR_GL();
 }
 
-void SeekToFrame(size_t iFrame)
+void SeekToFrame(size_t iFrame, bool bLock)
 {
-	C_AutoLock lock(&g_mutex);
+	if (bLock)
+	{
+		C_AutoLock lock(&g_mutex);
+		SeekToFrameImpl(iFrame);
+	}
+	else
+	{
+		SeekToFrameImpl(iFrame);
+	}
+}
+
+void SeekToFrameImpl(size_t iFrame)
+{
+	//C_AutoLock lock(&g_mutex);
 
 	decodeD2->SeekFrame(iFrame); // Setting the reading of the input file from the expected frame (from frame number <iFrame>)
 
@@ -1788,7 +2221,7 @@ void SeekToFrame(size_t iFrame)
 			{
 				if (g_bCopyToTexture)
 				{
-					gpu_copyImage(pBlock->DataPtr());
+					gpu_copyImage(pBlock->DataPtr(), pBlock->Size());
 				}
 			}
 			iCurPlayFrameNumber = iFrame; // Save currect frame number
@@ -1808,12 +2241,26 @@ void SeekToFrame(size_t iFrame)
 	}
 }
 
-void SeekToFrame(int x, int y)
+void SeekToFrame(int x, int y, bool bLock)
 {
-	GLint w = glutGet(GLUT_WINDOW_WIDTH); // Width in pixels of the current window
-	GLint h = glutGet(GLUT_WINDOW_HEIGHT); // Height in pixels of the current window
+    int w, h;
+
+    if (g_bGlutWindow)
+    {
+        w = glutGet(GLUT_WINDOW_WIDTH); // Width in pixels of the current window
+        h = glutGet(GLUT_WINDOW_HEIGHT); // Height in pixels of the current window
+    }
+#if defined(__LINUX__)
+    else if (g_bFramebuffer)
+    {
+        w = g_var_info.xres;
+        h = g_var_info.yres;
+    }
+#endif
+    else return;
 
 	sizeSquare2 = (float)w / 100;
+	sizeSquare = sizeSquare2 * 2;
 	edgeLineY = sizeSquare2 * 4;
 	edgeLineX = sizeSquare2 * 2;
 
@@ -1829,7 +2276,7 @@ void SeekToFrame(int x, int y)
 	{
 		size_t iFrame = (size_t)(((float)x * (float)(iAllFrames - 1)) / ((float)w - (2.f * edgeLineX)));
 
-		SeekToFrame(iFrame); // Seek to frame number <iFrame>
+		SeekToFrame(iFrame, bLock); // Seek to frame number <iFrame>
 	}
 }
 

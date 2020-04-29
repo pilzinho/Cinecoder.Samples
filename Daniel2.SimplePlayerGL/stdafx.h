@@ -17,6 +17,7 @@
 #include <thread>
 #include <mutex>
 #include <chrono>
+#include <algorithm>
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -72,6 +73,13 @@ using namespace cinegy::threading_std;
 #if defined(__WIN32__) || defined(__LINUX__) // CUDA
 	#define USE_CUDA_SDK
 	#define CUDA_WRAPPER
+	//#define USE_OPENCL_SDK // for build this code on Windows for example need add "opencl-nug" nuget package (nuget.org)
+#endif
+
+#ifdef USE_OPENCL_SDK
+//#define CL_USE_DEPRECATED_OPENCL_1_1_APIS // for clGetExtensionFunctionAddress
+#include <CL/cl.h>
+#include <CL/cl_gl.h>
 #endif
 
 // for build this code on Windows for example need add "glew.v140" and "freeglut.3.0.0.v140" nuget packages (nuget.org)
@@ -102,8 +110,11 @@ using namespace cinegy::threading_std;
 
 #include "cudaDefines.h"
 
-#if defined(__WIN32__) // use CUDA convert library
+#if defined(__WIN32__) || defined(__LINUX__) // use CUDA convert library
 #include "CUDAConvertLib.h"
+#ifndef __CUDAConvertLib__  
+#define __CUDAConvertLib__
+#endif
 #endif
 
 #define __vrcu \
