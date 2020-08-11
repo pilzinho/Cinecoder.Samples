@@ -151,7 +151,7 @@ int DecodeDaniel2::OpenFile(const char* const filename, size_t iMaxCountDecoders
 
                         Destroy(); // destroy decoder
 
-                        return hr;
+                        return -1;
                     }
             }
 
