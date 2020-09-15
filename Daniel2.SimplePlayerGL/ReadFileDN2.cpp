@@ -61,6 +61,10 @@ int ReadFileDN2::OpenFile(const char* filename)
 	Cinecoder_CreateClassFactory((ICC_ClassFactory**)&piFactory);
 	if (FAILED(hr)) return hr;
 
+	hr = piFactory->AssignLicense(COMPANYNAME, LICENSEKEY); // set license
+	if (FAILED(hr))
+		return printf("ReadFileDN2::OpenFile: AssignLicense failed!\n"), hr;
+
 	if (SUCCEEDED(hr)) hr = piFactory->CreateInstance(CLSID_CC_MvxFile, IID_ICC_MvxFile, (IUnknown**)&m_fileMvx);
 
 #if defined(__WIN32__)
@@ -77,8 +81,7 @@ int ReadFileDN2::OpenFile(const char* filename)
 	CC_UINT lenght = 0;
 	hr = m_fileMvx->get_Length(&lenght);
 
-    // Reduce by one here so we don't have to do it everywhere where the frame count is needed
-	m_frames = (CC_UINT)lenght - 1;
+    m_frames = (CC_UINT)lenght;
 
 	////////////////////////////
 
@@ -147,11 +150,11 @@ int ReadFileDN2::StopPipe()
 	return 0;
 }
 
-int ReadFileDN2::ReadFrame(size_t frame, C_Buffer & buffer, size_t & size)
+int ReadFileDN2::ReadFrame(size_t frame, C_Buffer & buffer, size_t & size, size_t & frameNum)
 {
 	C_AutoLock lock(&m_critical_read);
 
-	if (frame > m_frames)
+	if (frame >= m_frames)
 		return -1;
 
 #ifdef __STD_READ__
@@ -163,11 +166,13 @@ int ReadFileDN2::ReadFrame(size_t frame, C_Buffer & buffer, size_t & size)
 #endif
 	{
 		CC_MVX_ENTRY Idx;
-		if (!SUCCEEDED(m_fileMvx->FindEntryByCodingNumber((CC_UINT)frame, &Idx)))
+        auto hr = m_fileMvx->FindEntryByCodingNumber((CC_UINT)frame, &Idx);
+		if (!SUCCEEDED(hr))
 			return -1;
 
 		size_t offset = (size_t)Idx.Offset;
 		size = Idx.Size;
+		frameNum = Idx.FrameNumber;
 
 		size_t size_hdr = 0;
 		size_t size_data = size;
@@ -202,6 +207,13 @@ int ReadFileDN2::ReadFrame(size_t frame, C_Buffer & buffer, size_t & size)
 		if (size_hdr > 0)
 			memcpy(buffer.GetPtr(), hdr, size_hdr);
 
+		DWORD ret_size = 0;
+
+		if (!SUCCEEDED(m_fileMvx->UnwrapFrame(buffer.GetPtr(), static_cast<DWORD>(size), 0, &ret_size)))
+			return -1;
+
+		size = ret_size;
+
 		return 0;
 	}
 
@@ -215,7 +227,6 @@ CodedFrame* ReadFileDN2::MapFrame()
 	CodedFrame *pFrame = nullptr;
 
     m_queueFrames.Get(&pFrame, m_evExit);
-	//m_queueFrames.SoftGet(&pFrame);
 
 	return pFrame;
 }
@@ -232,7 +243,8 @@ void ReadFileDN2::UnmapFrame(CodedFrame* pFrame)
 
 long ReadFileDN2::ThreadProc()
 {
-	size_t iCurEncodedFrame = 0;
+    int iCurEncodedFrame = 0;
+	size_t frameNum = 0;
 
 	m_bProcess = true;
 	m_bReadFile = true;
@@ -259,38 +271,35 @@ long ReadFileDN2::ThreadProc()
 
 			if (m_bReadFile)
 			{
-				res = ReadFrame(iCurEncodedFrame, frame->coded_frame, frame->coded_frame_size);
+				res = ReadFrame(iCurEncodedFrame, frame->coded_frame, frame->coded_frame_size, frameNum);
 				data_rate += frame->coded_frame_size;
 			}
 			
+			frame->flags = 0;
+			if (bSeek) { frame->flags = 1; bSeek = false; }
+
+			//frame->frame_number = iCurEncodedFrame;
+			frame->frame_number = frameNum;
+			frame->coding_number = iCurEncodedFrame;
+			m_queueFrames.Queue(frame);
+
             if (res != 0)
             {
-                assert(0);
-                printf("ReadFrame failed res=%d coded_frame_size=%zu coded_frame=%p\n", res, frame->coded_frame_size, frame->coded_frame.GetPtr());
-            }
-            else 
-            {
-                frame->flags = 0;
-                if (bSeek) 
-                { 
-                    frame->flags = 1; 
-                    bSeek = false;
-                }
-                frame->frame_number = iCurEncodedFrame;
-                m_queueFrames.Queue(frame);
+				_assert(0);
+				printf("ReadFrame failed res=%d coded_frame_size=%zu coded_frame=0x%p\n", res, frame->coded_frame_size, frame->coded_frame.GetPtr());
             }
 		}
 
 		iCurEncodedFrame += m_iSpeed;
 
-        if (iCurEncodedFrame > m_frames) 
+        if (iCurEncodedFrame >= (int)m_frames)
         {
             iCurEncodedFrame = 0;
             if (!m_bLoop)
                 m_bPause = true;
         }
 		else if (iCurEncodedFrame < 0)
-			iCurEncodedFrame = m_frames;
+            iCurEncodedFrame = (int)m_frames - 1;
 
         if (m_bSeek)
         {

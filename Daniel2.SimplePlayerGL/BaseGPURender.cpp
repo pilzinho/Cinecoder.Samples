@@ -68,9 +68,9 @@ int BaseGPURender::SetParameters(bool bVSync, bool bRotate, bool bMaxFPS)
 	return 0;
 }
 
-int BaseGPURender::Init(std::string filename, size_t iMaxCountDecoders, bool useCuda, size_t gpuDevice, size_t iScale, IMAGE_FORMAT outputFormat)
+int BaseGPURender::Init(std::string filename, ST_VIDEO_DECODER_PARAMS dec_params, size_t gpuDevice)
 {
-	m_bUseGPU = useCuda;
+	m_bUseGPU = dec_params.type & VD_TYPE_CUDA ? true : false;
 
 	m_decodeD2 = std::make_shared<DecodeDaniel2>(); // Create decoder for decoding DN2 files
 
@@ -113,11 +113,11 @@ int BaseGPURender::Init(std::string filename, size_t iMaxCountDecoders, bool use
 			}
 		}
 
-		//m_decodeD2->InitD3DX11Render((GPURenderDX*)this);
-		//m_decodeD2->InitD3DXAdapter(m_pCapableAdapter);
+		m_decodeD2->InitD3DX11Render((GPURenderDX*)this);
+		m_decodeD2->InitD3DXAdapter(m_pCapableAdapter);
 	}
 
-	int res = m_decodeD2->OpenFile(filename.c_str(), iMaxCountDecoders, useCuda, iScale, outputFormat);
+	int res = m_decodeD2->OpenFile(filename.c_str(), dec_params);
 
 	if (res != 0)
 	{
@@ -210,8 +210,8 @@ LRESULT BaseGPURender::ProcessWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
 
 	RECT rc;
 	GetClientRect(m_hWnd, &rc);
-	UINT width = rc.right - rc.left;    // получаем ширину
-	UINT height = rc.bottom - rc.top;   // и высоту окна
+	UINT width = rc.right - rc.left;    // РїРѕР»СѓС‡Р°РµРј С€РёСЂРёРЅСѓ
+	UINT height = rc.bottom - rc.top;   // Рё РІС‹СЃРѕС‚Сѓ РѕРєРЅР°
 
 	switch (msg)
 	{
@@ -390,6 +390,9 @@ LRESULT BaseGPURender::ProcessWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM
 		{
 			m_bDecoder = !m_bDecoder;
 			m_decodeD2->SetDecode(m_bDecoder);
+			
+			if (m_bDecoder)	
+				m_decodeD2->SeekFrame(iCurPlayFrameNumber);
 
 			if (m_bDecoder)
 				printf("decoder: on\n");
@@ -699,7 +702,7 @@ int BaseGPURender::CopyCUDAImage(C_Block *pBlock)
 		}
 		else if (output_format == IMAGE_FORMAT_BGRA8BIT)
 		{
-			//h_convert_Y216_to_BGRA32_BtT(PARAMS); __vrcu
+			h_convert_Y216_to_BGRA32_BtT(PARAMS); __vrcu
 		}
 	}
 	else if (buffer_format == BUFFER_FORMAT_NV12)

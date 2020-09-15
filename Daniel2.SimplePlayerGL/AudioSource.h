@@ -16,19 +16,25 @@
 #include <AL/alc.h>
 #endif
 
+// alGetError() returns AL_INVALID_OPERATION if a current context is not set.
+
 #ifndef NDEBUG
 #define __al { \
+	if (alcGetCurrentContext()) \
+	{ \
 	ALuint alRes = alGetError(); \
 	if (alRes != AL_NO_ERROR) { \
 	printf("al error = 0x%x line = %d\n", alRes, __LINE__); \
 	return alRes; \
-	} }
+	} } }
 
 #define __al_void { \
+	if (alcGetCurrentContext()) \
+	{ \
 	ALuint alRes = alGetError(); \
 	if (alRes != AL_NO_ERROR) { \
 	printf("al error = 0x%x line = %d\n", alRes, __LINE__); \
-	} }
+	} } }
 #else
 #define __al
 #define __al_void
@@ -42,7 +48,6 @@ private:
 	bool m_bInitialize;
 
 	com_ptr<ICC_MediaReader> m_pMediaReader;
-	com_ptr<ICC_AudioStreamInfo> m_pAudioStreamInfo;
 
 	std::vector<BYTE> audioChunk;
 
@@ -56,12 +61,14 @@ private:
 	int m_iSpeed;
 
 	CC_FRAME_RATE m_FrameRate;
+	CC_AUDIO_FMT m_AudioFormat;
 
 	//ALCdevice *device;
 	//ALCcontext *context;
 
 	ALuint source;
 	ALuint buffers[NUM_BUFFERS];
+	ALenum ALformat;
 
 	bool m_bAudioPause;
 	bool m_bProcess;

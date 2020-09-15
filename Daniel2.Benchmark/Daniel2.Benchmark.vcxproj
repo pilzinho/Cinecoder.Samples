@@ -1,9 +1,8 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Import Project="..\packages\Cinecoder.Plugin.Multiplexers.1.2.5\build\Cinecoder.Plugin.Multiplexers.props" Condition="Exists('..\packages\Cinecoder.Plugin.Multiplexers.1.2.5\build\Cinecoder.Plugin.Multiplexers.props')" />
   <Import Project="..\packages\Cinecoder.3.33.29.41258\build\Cinecoder.props" Condition="Exists('..\packages\Cinecoder.3.33.29.41258\build\Cinecoder.props')" />
-  <Import Project="..\packages\NUnit.3.12.0\build\NUnit.props" Condition="Exists('..\packages\NUnit.3.12.0\build\NUnit.props')" />
   <Import Project="..\packages\Cinecoder.Plugin.GpuCodecs.2.23.5.20032\build\Cinecoder.Plugin.GpuCodecs.props" Condition="Exists('..\packages\Cinecoder.Plugin.GpuCodecs.2.23.5.20032\build\Cinecoder.Plugin.GpuCodecs.props')" />
+  <Import Project="..\packages\NUnit.3.12.0\build\NUnit.props" Condition="Exists('..\packages\NUnit.3.12.0\build\NUnit.props')" />
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
       <Configuration>Debug</Configuration>
@@ -23,9 +22,9 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{51658988-3725-4D7C-B7FB-7926F76E0229}</ProjectGuid>
+    <ProjectGuid>{63cac2ac-aeea-4569-9f40-7f19ecf0ab1b}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
-    <RootNamespace>Daniel2.DPXEncoder</RootNamespace>
+    <RootNamespace>Daniel2.Benchmark</RootNamespace>
     <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -75,31 +74,28 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
-    <TargetName>Daniel2.DPXEncoder</TargetName>
     <OutDir>$(SolutionDir)_bin\$(Configuration).$(Platform)\</OutDir>
     <IntDir>$(SolutionDir)_obj\$(ProjectName)\$(Configuration).$(Platform)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <TargetName>Daniel2.DPXEncoder</TargetName>
     <OutDir>$(SolutionDir)_bin\$(Configuration).$(Platform)\</OutDir>
     <IntDir>$(SolutionDir)_obj\$(ProjectName)\$(Configuration).$(Platform)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
-    <TargetName>Daniel2.DPXEncoder</TargetName>
     <OutDir>$(SolutionDir)_bin\$(Configuration).$(Platform)\</OutDir>
     <IntDir>$(SolutionDir)_obj\$(ProjectName)\$(Configuration).$(Platform)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <TargetName>Daniel2.DPXEncoder</TargetName>
     <OutDir>$(SolutionDir)_bin\$(Configuration).$(Platform)\</OutDir>
     <IntDir>$(SolutionDir)_obj\$(ProjectName)\$(Configuration).$(Platform)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
-      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeader>
+      </PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -112,7 +108,8 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeader>
+      </PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -126,7 +123,8 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
-      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeader>
+      </PrecompiledHeader>
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
@@ -143,7 +141,8 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
-      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeader>
+      </PrecompiledHeader>
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
@@ -158,20 +157,10 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="CEncoderTest.h" />
-    <ClInclude Include="stdafx.h" />
-    <ClInclude Include="targetver.h" />
+    <ClCompile Include="Daniel2.Benchmark.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="CEncoderTest.cpp" />
-    <ClCompile Include="CudaMemAlloc.cpp" />
-    <ClCompile Include="Daniel2.DPXEncoder.cpp" />
-    <ClCompile Include="stdafx.cpp">
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
-    </ClCompile>
+    <ClInclude Include="file_writer.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
@@ -179,19 +168,18 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="..\packages\Cinecoder.Plugin.GpuCodecs.2.23.5.20032\build\Cinecoder.Plugin.GpuCodecs.targets" Condition="Exists('..\packages\Cinecoder.Plugin.GpuCodecs.2.23.5.20032\build\Cinecoder.Plugin.GpuCodecs.targets')" />
+    <Import Project="..\packages\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.1.8.0\build\native\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.targets" Condition="Exists('..\packages\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.1.8.0\build\native\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.targets')" />
     <Import Project="..\packages\Cinecoder.3.33.29.41258\build\Cinecoder.targets" Condition="Exists('..\packages\Cinecoder.3.33.29.41258\build\Cinecoder.targets')" />
-    <Import Project="..\packages\Cinecoder.Plugin.Multiplexers.1.2.5\build\Cinecoder.Plugin.Multiplexers.targets" Condition="Exists('..\packages\Cinecoder.Plugin.Multiplexers.1.2.5\build\Cinecoder.Plugin.Multiplexers.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
     </PropertyGroup>
+    <Error Condition="!Exists('..\packages\NUnit.3.12.0\build\NUnit.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\NUnit.3.12.0\build\NUnit.props'))" />
     <Error Condition="!Exists('..\packages\Cinecoder.Plugin.GpuCodecs.2.23.5.20032\build\Cinecoder.Plugin.GpuCodecs.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Cinecoder.Plugin.GpuCodecs.2.23.5.20032\build\Cinecoder.Plugin.GpuCodecs.props'))" />
     <Error Condition="!Exists('..\packages\Cinecoder.Plugin.GpuCodecs.2.23.5.20032\build\Cinecoder.Plugin.GpuCodecs.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Cinecoder.Plugin.GpuCodecs.2.23.5.20032\build\Cinecoder.Plugin.GpuCodecs.targets'))" />
-    <Error Condition="!Exists('..\packages\NUnit.3.12.0\build\NUnit.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\NUnit.3.12.0\build\NUnit.props'))" />
+    <Error Condition="!Exists('..\packages\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.1.8.0\build\native\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.1.8.0\build\native\Microsoft.googletest.v140.windesktop.msvcstl.static.rt-dyn.targets'))" />
     <Error Condition="!Exists('..\packages\Cinecoder.3.33.29.41258\build\Cinecoder.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Cinecoder.3.33.29.41258\build\Cinecoder.props'))" />
     <Error Condition="!Exists('..\packages\Cinecoder.3.33.29.41258\build\Cinecoder.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Cinecoder.3.33.29.41258\build\Cinecoder.targets'))" />
-    <Error Condition="!Exists('..\packages\Cinecoder.Plugin.Multiplexers.1.2.5\build\Cinecoder.Plugin.Multiplexers.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Cinecoder.Plugin.Multiplexers.1.2.5\build\Cinecoder.Plugin.Multiplexers.props'))" />
-    <Error Condition="!Exists('..\packages\Cinecoder.Plugin.Multiplexers.1.2.5\build\Cinecoder.Plugin.Multiplexers.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Cinecoder.Plugin.Multiplexers.1.2.5\build\Cinecoder.Plugin.Multiplexers.targets'))" />
   </Target>
 </Project>
