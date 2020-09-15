@@ -14,24 +14,6 @@ typedef signed short INT16;
 typedef long long UINT64;
 #endif
 
-#ifndef NDEBUG
-#define __al { \
-	ALuint alRes = alGetError(); \
-	if (alRes != AL_NO_ERROR) { \
-	fprintf(stdout, "al error = 0x%x line = %d\n", alRes, __LINE__); \
-	return alRes; \
-	} }
-
-#define __al_void { \
-	ALuint alRes = alGetError(); \
-	if (alRes != AL_NO_ERROR) { \
-	fprintf(stdout, "al error = 0x%x line = %d\n", alRes, __LINE__); \
-	} }
-#else
-#define __al
-#define __al_void
-#endif
-
 static void ReverseSamples(BYTE *p, int iSize, int nBlockAlign)
 {
 	long lActual = iSize;
@@ -100,8 +82,7 @@ AudioSource::AudioSource() :
 	m_FrameRate{ 25, 1 },
 	m_bAudioPause(false),
 	m_iSpeed(1),
-	m_bProcess(false),
-    m_iCurrentFrame(0)
+	m_bProcess(false)
 {
 }
 
@@ -110,34 +91,16 @@ AudioSource::~AudioSource()
 	m_bProcess = false;
 
 	Close(); // closing thread <ThreadProc>
-    DestroySource();
+    DestroyOpenAL();
 }
 
 int AudioSource::Init(CC_FRAME_RATE video_framerate, const size_t frameCount)
 {
 	m_FrameRate = video_framerate;
-    m_iFrameCount = frameCount;
 	return 0;
 }
 
-int AudioSource::Play(const size_t frameNumber)
-{
-    ALvoid* data = nullptr;
-    ALsizei size = 0;
-    if (UpdateAudioChunk(frameNumber, &data, &size) == S_OK && data && size > 0)
-    {
-        ALsizei frequency = static_cast<ALsizei>(m_iSampleRate);
-        ALenum  format = (m_iNumChannels == 2) ? AL_FORMAT_STEREO16 : AL_FORMAT_MONO16;
-
-        ALuint buffer;
-
-        alSourceUnqueueBuffers(source, 1, &buffer); __al
-        alBufferData(buffer, format, data, size, frequency); __al
-        alSourceQueueBuffers(source, 1, &buffer); __al
-    }
-}
-
-int AudioSource::InitSource()
+int AudioSource::InitOpenAL()
 {
     alGenBuffers(NUM_BUFFERS, buffers); __al
     alGenSources(1, &source); __al
@@ -173,7 +136,7 @@ int AudioSource::InitSource()
     Create(); // creating thread <ThreadProc>
 }
 
-int AudioSource::DestroySource()
+int AudioSource::DestroyOpenAL()
 {
 	alDeleteSources(1, &source); __al
 	alDeleteBuffers(NUM_BUFFERS, buffers); __al
@@ -275,7 +238,7 @@ int AudioSource::OpenFile(const char* const filename, const bool autoPlay /*=tru
 
 	audioChunk.resize(sample_bytes);
 
-    if (InitSource() < 0 || SetPause(!autoPlay) < 0)
+    if (InitOpenAL() < 0 || SetPause(!autoPlay) < 0)
         return -1;
 
     return 0;
@@ -336,7 +299,9 @@ float AudioSource::GetVolume()
 long AudioSource::ThreadProc()
 {
 	m_bProcess = true;
-    m_iCurrentFrame = NUM_BUFFERS;
+
+    size_t iCurFrame = NUM_BUFFERS;
+
     double timePerFrame = 1.0 / (m_FrameRate.num / (double)m_FrameRate.denom);
     Seconds printStatsInterval(1); // Print stats every n seconds
     auto lastPrintStatsTime = Clock::now();
@@ -352,29 +317,30 @@ long AudioSource::ThreadProc()
 
 		ALint numProcessed = 0;
 		alGetSourcei(source, AL_BUFFERS_PROCESSED, &numProcessed); __al
-		if (numProcessed > 0 /*&& m_iCurrentFrame < m_iFrameCount*/)
+		if (numProcessed > 0)
         {
             if (queueFrames.size() > 0)
             {
                 C_AutoLock lock(&m_CritSec);
-                m_iCurrentFrame = queueFrames.front();
+
+                iCurFrame = queueFrames.front();
                 queueFrames.pop();
             }
 
             ++decodedFps;
 			ALvoid* data = nullptr;
 			ALsizei size = 0;
-            if (UpdateAudioChunk(m_iCurrentFrame/*++*/, &data, &size) == S_OK && data && size > 0)
+            if (UpdateAudioChunk(iCurFrame, &data, &size) == S_OK && data && size > 0)
             {
 				ALsizei frequency = static_cast<ALsizei>(m_iSampleRate);
 				ALenum  format = (m_iNumChannels == 2) ? AL_FORMAT_STEREO16 : AL_FORMAT_MONO16;
+
 				ALuint buffer;
 
                 alSourceUnqueueBuffers(source, 1, &buffer); __al
 				alBufferData(buffer, format, data, size, frequency); __al
                 alSourceQueueBuffers(source, 1, &buffer); __al                
             }
-            --numProcessed;
         }
 
         ALint source_state = 0;

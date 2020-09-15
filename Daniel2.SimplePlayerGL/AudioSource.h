@@ -16,7 +16,23 @@
 #include <AL/alc.h>
 #endif
 
+#ifndef NDEBUG
+#define __al { \
+	ALuint alRes = alGetError(); \
+	if (alRes != AL_NO_ERROR) { \
+	printf("al error = 0x%x line = %d\n", alRes, __LINE__); \
+	return alRes; \
+	} }
 
+#define __al_void { \
+	ALuint alRes = alGetError(); \
+	if (alRes != AL_NO_ERROR) { \
+	printf("al error = 0x%x line = %d\n", alRes, __LINE__); \
+	} }
+#else
+#define __al
+#define __al_void
+#endif
 
 #define NUM_BUFFERS 6
 
@@ -39,8 +55,6 @@ private:
 
 	int m_iSpeed;
 
-    std::atomic_size_t m_iCurrentFrame;
-    size_t m_iFrameCount;
 	CC_FRAME_RATE m_FrameRate;
 
 	//ALCdevice *device;
@@ -77,11 +91,9 @@ public:
 
     float GetVolume();
 
-    int Play(const size_t frameNumber);
-
 private:
-    int InitSource();
-    int DestroySource();
+    int InitOpenAL();
+    int DestroyOpenAL();
 
 	HRESULT UpdateAudioChunk(size_t iFrame, ALvoid** data, ALsizei* size);
 
