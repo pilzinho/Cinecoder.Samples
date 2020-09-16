@@ -278,8 +278,10 @@ int AudioSource::OpenFile(const char* const filename, const bool autoPlay /*=tru
 
             if (BitsPerSample == 8)
                 m_AudioFormat = CAF_PCM8;
-            else if (BitsPerSample == 16)
+            else { //if (BitsPerSample == 16)
                 m_AudioFormat = CAF_PCM16;
+                BitsPerSample = 16; // Max 16 bits
+            }
 
             if (FrameRateMR.num != 0)
                 m_FrameRate = FrameRateMR;
@@ -305,12 +307,12 @@ int AudioSource::OpenFile(const char* const filename, const bool autoPlay /*=tru
     }
     printf("-------------------------------------\n");
 
-    if (m_iBitsPerSample != 16)
-    {
-        printf("error: BitsPerSample != 16 bits (support only 16 bits)\n");
-        m_pMediaReader = nullptr;
-        return -1;
-    }
+    //if (m_iBitsPerSample != 16)
+    //{
+    //    printf("error: BitsPerSample != 16 bits (support only 16 bits)\n");
+    //    m_pMediaReader = nullptr;
+    //    return -1;
+    //}
 
     if (InitOpenAL() < 0 || SetPause(!autoPlay) < 0)
         return -1;
