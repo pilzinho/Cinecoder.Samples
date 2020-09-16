@@ -56,6 +56,7 @@ DecodeDaniel2::DecodeDaniel2() :
     m_bInitDecoder(false),
     m_bUseCuda(false),
     m_bUseCudaHost(false),
+    m_bPutColorFormat(false),
     m_pVideoDec(nullptr),
     m_pMediaReader(nullptr),
     m_strStreamType("Unknown"),
